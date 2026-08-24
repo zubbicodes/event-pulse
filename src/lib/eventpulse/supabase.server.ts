@@ -87,6 +87,9 @@ type TargetRow = {
   min_tickets: number;
   max_price: number | null;
   normal_tickets_only: boolean;
+  even_ticket_quantities_only?: boolean | null;
+  monitor_starts_at?: string | null;
+  monitor_ends_at?: string | null;
   deep_link: string;
   last_checked_at: string | null;
   last_response_ms: number | null;
@@ -208,27 +211,49 @@ export async function insertTarget(input: NewTargetInput) {
     minTickets: input.minTickets,
     maxPrice: input.maxPrice,
     normalTicketsOnly: input.normalTicketsOnly,
+    evenTicketQuantitiesOnly: input.evenTicketQuantitiesOnly,
   });
 
-  const [row] = await rest<TargetRow[]>("eventpulse_targets", {
-    method: "POST",
-    prefer: "return=representation",
-    body: {
-      platform: input.platform,
-      event_name: input.event,
-      venue: input.venue,
-      target_url: input.url,
-      refresh_seconds: input.refresh,
-      profile_name: input.profile,
-      proxy_label: input.proxy,
-      section_filters: input.sectionFilters,
-      min_tickets: input.minTickets,
-      max_price: input.maxPrice,
-      normal_tickets_only: input.normalTicketsOnly,
-      deep_link: deepLink,
-      availability: `Watching ${input.minTickets}+ ${input.normalTicketsOnly ? "standard" : "any"} tickets`,
-    },
-  });
+  const body = {
+    platform: input.platform,
+    event_name: input.event,
+    venue: input.venue,
+    target_url: input.url,
+    refresh_seconds: input.refresh,
+    profile_name: input.profile,
+    proxy_label: input.proxy,
+    section_filters: input.sectionFilters,
+    min_tickets: input.minTickets,
+    max_price: input.maxPrice,
+    normal_tickets_only: input.normalTicketsOnly,
+    even_ticket_quantities_only: input.evenTicketQuantitiesOnly,
+    monitor_starts_at: input.monitorStartsAt,
+    monitor_ends_at: input.monitorEndsAt,
+    deep_link: deepLink,
+    availability: formatWatchSummary(input),
+  };
+
+  let row: TargetRow | undefined;
+  try {
+    [row] = await rest<TargetRow[]>("eventpulse_targets", {
+      method: "POST",
+      prefer: "return=representation",
+      body,
+    });
+  } catch (error) {
+    if (!isMissingTargetSchedulingColumns(error)) throw error;
+    const {
+      even_ticket_quantities_only: _evenTicketQuantitiesOnly,
+      monitor_starts_at: _monitorStartsAt,
+      monitor_ends_at: _monitorEndsAt,
+      ...legacyBody
+    } = body;
+    [row] = await rest<TargetRow[]>("eventpulse_targets", {
+      method: "POST",
+      prefer: "return=representation",
+      body: legacyBody,
+    });
+  }
 
   return row ? mapTarget(row) : undefined;
 }
@@ -484,7 +509,7 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
 
     const delivery = await deliverAlert({
       ...(alert?.id ? { alertId: alert.id } : {}),
-      title: "EventPulse ticket alert",
+      title: "HD-1 Drop Monitor ticket alert",
       body: alertMessage,
       url: target.deepLink,
       settings,
@@ -518,13 +543,17 @@ function mapTarget(row: TargetRow): BackendMonitorTarget {
         minTickets: row.min_tickets,
         maxPrice: row.max_price,
         normalTicketsOnly: row.normal_tickets_only,
+        evenTicketQuantitiesOnly: row.even_ticket_quantities_only ?? false,
       }),
     filters: {
       sectionFilters: row.section_filters ?? [],
       minTickets: row.min_tickets,
       maxPrice: row.max_price,
       normalTicketsOnly: row.normal_tickets_only,
+      evenTicketQuantitiesOnly: row.even_ticket_quantities_only ?? false,
     },
+    monitorStartsAt: row.monitor_starts_at ?? null,
+    monitorEndsAt: row.monitor_ends_at ?? null,
     lastCheckedAt: row.last_checked_at,
     responseMs: row.last_response_ms,
   };
@@ -590,6 +619,16 @@ function isMissingFolderIdColumn(error: unknown) {
   );
 }
 
+function isMissingTargetSchedulingColumns(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.message.includes("even_ticket_quantities_only") ||
+      error.message.includes("monitor_starts_at") ||
+      error.message.includes("monitor_ends_at")) &&
+    error.message.includes("schema cache")
+  );
+}
+
 function formatSupabaseError(table: string, status: number, body: string) {
   if (status === 525 || body.includes("SSL handshake failed") || body.includes("Error code 525")) {
     return `Supabase ${table}: Cloudflare 525 SSL handshake failed. Fix SSL on eventpulsesb.web-testlink.com origin or set SUPABASE_URL to a reachable Supabase Kong URL.`;
@@ -627,9 +666,19 @@ function formatMultiloginError(status: number, body: string) {
 }
 
 function isTargetDue(row: TargetRow) {
+  const now = Date.now();
+  if (row.monitor_starts_at && now < new Date(row.monitor_starts_at).getTime()) return false;
+  if (row.monitor_ends_at && now > new Date(row.monitor_ends_at).getTime()) return false;
   if (!row.last_checked_at) return true;
-  const ageMs = Date.now() - new Date(row.last_checked_at).getTime();
+  const ageMs = now - new Date(row.last_checked_at).getTime();
   return ageMs >= Number(row.refresh_seconds) * 1000;
+}
+
+function formatWatchSummary(input: NewTargetInput) {
+  const quantity = input.evenTicketQuantitiesOnly
+    ? `even quantities from ${input.minTickets}+`
+    : `${input.minTickets}+`;
+  return `Watching ${quantity} ${input.normalTicketsOnly ? "standard" : "any"} tickets`;
 }
 
 async function checkTarget(target: BackendMonitorTarget): Promise<MonitorCheckResult> {
@@ -800,24 +849,40 @@ async function sendTwilioMessage(kind: "sms" | "whatsapp", body: string, errors:
   const sid = process.env["TWILIO_ACCOUNT_SID"];
   const token = process.env["TWILIO_AUTH_TOKEN"];
   const from = process.env[kind === "sms" ? "TWILIO_SMS_FROM" : "TWILIO_WHATSAPP_FROM"];
-  const to = process.env[kind === "sms" ? "TWILIO_SMS_TO" : "TWILIO_WHATSAPP_TO"];
-  if (!sid || !token || !from || !to) {
+  const recipients = parseRecipients(
+    process.env[kind === "sms" ? "TWILIO_SMS_TO" : "TWILIO_WHATSAPP_TO"],
+  );
+  if (!sid || !token || !from || recipients.length === 0) {
     errors.push(`Twilio ${kind} env missing; message not sent.`);
     return 0;
   }
 
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-    method: "POST",
-    headers: {
-      authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString("base64")}`,
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({ From: from, To: to, Body: body }),
-  });
+  let sent = 0;
+  for (const to of recipients) {
+    const response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString("base64")}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ From: from, To: to, Body: body }),
+      },
+    );
 
-  if (!response.ok) {
-    errors.push(`Twilio ${kind} failed: ${response.status}`);
-    return 0;
+    if (response.ok) {
+      sent += 1;
+    } else {
+      errors.push(`Twilio ${kind} failed for ${to}: ${response.status}`);
+    }
   }
-  return 1;
+  return sent;
+}
+
+function parseRecipients(value: string | undefined) {
+  return (value ?? "")
+    .split(",")
+    .map((recipient) => recipient.trim())
+    .filter(Boolean);
 }

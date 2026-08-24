@@ -22,6 +22,7 @@ dist-ssr
 # Local handoff / planning docs
 BACKEND_STATUS.md
 CLIENT_REQUIREMENTS.md
+HD1dropmonitor.docx
 
 # Local Supabase migration drafts handled outside Git for this handoff
 supabase/migrations/

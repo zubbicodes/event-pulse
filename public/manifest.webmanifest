@@ -1,6 +1,6 @@
 {
-  "name": "EventPulse Dashboard",
-  "short_name": "EventPulse",
+  "name": "HD-1 Drop Monitor",
+  "short_name": "HD-1 Monitor",
   "description": "Multi-platform event ticketing analytics and proxy/profile monitoring.",
   "start_url": "/",
   "scope": "/",

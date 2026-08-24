@@ -19,7 +19,8 @@ export function Header({
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 lg:flex lg:flex-wrap lg:justify-between lg:px-6">
         <div className="min-w-0">
           <h1 className="truncate font-display text-base font-bold tracking-tight sm:text-lg">
-            EventPulse <span className="text-muted-foreground">| Multi-Site Ticket Monitor</span>
+            HD-1 Drop Monitor{" "}
+            <span className="text-muted-foreground">| Multi-Site Ticket Monitor</span>
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">

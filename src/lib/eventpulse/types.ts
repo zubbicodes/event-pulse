@@ -5,6 +5,7 @@ export interface TargetFilterConfig {
   minTickets: number;
   maxPrice: number | null;
   normalTicketsOnly: boolean;
+  evenTicketQuantitiesOnly: boolean;
 }
 
 export interface BackendMonitorTarget {
@@ -20,6 +21,8 @@ export interface BackendMonitorTarget {
   proxy: string;
   deepLink: string;
   filters: TargetFilterConfig;
+  monitorStartsAt: string | null;
+  monitorEndsAt: string | null;
   lastCheckedAt: string | null;
   responseMs: number | null;
 }
@@ -85,6 +88,9 @@ export interface NewTargetInput {
   minTickets: number;
   maxPrice: number | null;
   normalTicketsOnly: boolean;
+  evenTicketQuantitiesOnly: boolean;
+  monitorStartsAt: string | null;
+  monitorEndsAt: string | null;
 }
 
 export type SaveSettingsInput = BackendSettings;

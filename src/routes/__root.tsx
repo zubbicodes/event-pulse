@@ -78,13 +78,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "EventPulse | Multi-Site Ticket Monitor" },
+      { title: "HD-1 Drop Monitor | Multi-Site Ticket Monitor" },
       {
         name: "description",
         content: "Real-time multi-platform ticket monitoring and proxy profile management.",
       },
       { name: "theme-color", content: "#0F172A" },
-      { property: "og:title", content: "EventPulse | Multi-Site Ticket Monitor" },
+      { property: "og:title", content: "HD-1 Drop Monitor | Multi-Site Ticket Monitor" },
       {
         property: "og:description",
         content: "Real-time multi-platform ticket monitoring and proxy profile management.",
@@ -132,7 +132,7 @@ function RootComponent() {
 
   useEffect(() => {
     registerEventPulseServiceWorker().catch((error: unknown) => {
-      console.error("EventPulse service worker registration failed", error);
+      console.error("HD-1 Drop Monitor service worker registration failed", error);
     });
   }, []);
 

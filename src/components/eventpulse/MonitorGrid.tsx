@@ -36,6 +36,9 @@ export function MonitorGrid({
     minTickets: 2,
     maxPrice: "",
     normalTicketsOnly: true,
+    evenTicketQuantitiesOnly: false,
+    monitorStartsAt: "",
+    monitorEndsAt: "",
   });
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -62,6 +65,8 @@ export function MonitorGrid({
             .map((section) => section.trim())
             .filter(Boolean),
           maxPrice: form.maxPrice ? Number(form.maxPrice) : null,
+          monitorStartsAt: toIsoOrNull(form.monitorStartsAt),
+          monitorEndsAt: toIsoOrNull(form.monitorEndsAt),
         },
       });
       setShowForm(false);
@@ -171,6 +176,15 @@ export function MonitorGrid({
               }
               className="text-xs"
             />
+            <label className="flex items-center justify-between gap-3 rounded-md bg-secondary/60 px-3 py-2.5 text-xs">
+              Even quantities only
+              <Switch
+                checked={form.evenTicketQuantitiesOnly}
+                onCheckedChange={(checked) =>
+                  setForm((value) => ({ ...value, evenTicketQuantitiesOnly: checked }))
+                }
+              />
+            </label>
             <Input
               type="number"
               value={form.maxPrice}
@@ -197,6 +211,28 @@ export function MonitorGrid({
                 onCheckedChange={(checked) =>
                   setForm((value) => ({ ...value, normalTicketsOnly: checked }))
                 }
+              />
+            </label>
+            <label className="space-y-1 text-xs text-muted-foreground">
+              Start monitoring
+              <Input
+                type="datetime-local"
+                value={form.monitorStartsAt}
+                onChange={(event) =>
+                  setForm((value) => ({ ...value, monitorStartsAt: event.target.value }))
+                }
+                className="text-xs"
+              />
+            </label>
+            <label className="space-y-1 text-xs text-muted-foreground">
+              Stop monitoring
+              <Input
+                type="datetime-local"
+                value={form.monitorEndsAt}
+                onChange={(event) =>
+                  setForm((value) => ({ ...value, monitorEndsAt: event.target.value }))
+                }
+                className="text-xs"
               />
             </label>
             <Button
@@ -277,13 +313,15 @@ export function MonitorGrid({
                     {t.profile} ({t.proxy})
                   </span>
                 </div>
+                <div className="text-muted-foreground">{formatTargetRules(t)}</div>
+                <div className="text-muted-foreground">{formatMonitorWindow(t)}</div>
               </dl>
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button size="sm" className="font-semibold" asChild>
                   <a href={t.deepLink} target="_blank" rel="noopener noreferrer">
                     <Play className="h-3.5 w-3.5" />
-                    Launch Deep Link
+                    Open Ticket Page
                   </a>
                 </Button>
                 <Button
@@ -318,4 +356,40 @@ export function MonitorGrid({
       </div>
     </section>
   );
+}
+
+function toIsoOrNull(value: string) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function formatTargetRules(target: BackendMonitorTarget) {
+  const parts = [
+    `${target.filters.minTickets}+ tickets`,
+    target.filters.normalTicketsOnly ? "standard only" : "any ticket type",
+  ];
+  if (target.filters.evenTicketQuantitiesOnly) parts.push("even quantities only");
+  if (target.filters.sectionFilters.length > 0) {
+    parts.push(`sections: ${target.filters.sectionFilters.join(", ")}`);
+  }
+  if (target.filters.maxPrice != null) parts.push(`max price: ${target.filters.maxPrice}`);
+  return parts.join(" / ");
+}
+
+function formatMonitorWindow(target: BackendMonitorTarget) {
+  if (!target.monitorStartsAt && !target.monitorEndsAt)
+    return "monitor window: active whenever unpaused";
+  const start = target.monitorStartsAt ? formatDateTime(target.monitorStartsAt) : "now";
+  const end = target.monitorEndsAt ? formatDateTime(target.monitorEndsAt) : "manual stop";
+  return `monitor window: ${start} to ${end}`;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

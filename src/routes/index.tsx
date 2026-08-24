@@ -15,13 +15,13 @@ export const Route = createFileRoute("/")({
   }),
   head: () => ({
     meta: [
-      { title: "EventPulse | Multi-Site Ticket Monitor Dashboard" },
+      { title: "HD-1 Drop Monitor | Multi-Site Ticket Monitor Dashboard" },
       {
         name: "description",
         content:
           "Real-time ticketing analytics across Ticketmaster, AXS and SeeTickets with MultiLogin proxy profile management.",
       },
-      { property: "og:title", content: "EventPulse | Multi-Site Ticket Monitor" },
+      { property: "og:title", content: "HD-1 Drop Monitor | Multi-Site Ticket Monitor" },
       {
         property: "og:description",
         content:

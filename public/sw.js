@@ -13,7 +13,7 @@ function buildAlertOptions({ body, tag, url }) {
     silent: false,
     timestamp: Date.now(),
     vibrate: ALERT_VIBRATION_PATTERN,
-    actions: [{ action: "open", title: "Open EventPulse" }],
+    actions: [{ action: "open", title: "Open HD-1" }],
     data: { url: url || "/" },
   };
 }
@@ -55,7 +55,7 @@ self.addEventListener("fetch", (event) => {
 
 self.addEventListener("push", (event) => {
   let payload = {
-    title: "EventPulse Alert",
+    title: "HD-1 Drop Monitor Alert",
     body: "New ticket activity detected.",
     url: "/",
   };
@@ -85,7 +85,7 @@ self.addEventListener("message", (event) => {
 
   event.waitUntil(
     self.registration.showNotification(
-      "EventPulse test alert",
+      "HD-1 Drop Monitor test alert",
       buildAlertOptions({
         body: "Push notification path is ready for backend wiring.",
         tag: `eventpulse-test-${Date.now()}`,
@@ -100,16 +100,14 @@ self.addEventListener("notificationclick", (event) => {
   const url = event.notification.data?.url || "/";
 
   event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((clients) => {
-        const existing = clients.find((client) => "focus" in client);
-        if (!existing) return self.clients.openWindow(url);
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => "focus" in client);
+      if (!existing) return self.clients.openWindow(url);
 
-        if ("navigate" in existing && existing.url !== url) {
-          return existing.navigate(url).then(() => existing.focus());
-        }
-        return existing.focus();
-      }),
+      if ("navigate" in existing && existing.url !== url) {
+        return existing.navigate(url).then(() => existing.focus());
+      }
+      return existing.focus();
+    }),
   );
 });

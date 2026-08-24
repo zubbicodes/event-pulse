@@ -1,6 +1,6 @@
-# Event Pulse
+# HD-1 Drop Monitor
 
-Create a modern, dark-mode, high-performance Progressive Web Application (PWA) central monitoring dashboard called "EventPulse Dashboard" designed for multi-platform event ticketing analytics and proxy/profile management.
+Create a modern, dark-mode, high-performance Progressive Web Application (PWA) central monitoring dashboard called "HD-1 Drop Monitor" designed for multi-platform event ticketing analytics and proxy/profile management.
 
 Design Aesthetics & Theme:
 
@@ -14,7 +14,7 @@ Core Sections & Layout Structure:
 
 1. Top Header Bar:
 
-- App Title: "EventPulse | Multi-Site Ticket Monitor"
+- App Title: "HD-1 Drop Monitor | Multi-Site Ticket Monitor"
 
 - Real-time Uptime Indicator: "System Active • 12 Targets Live" with a pulsing green dot.
 

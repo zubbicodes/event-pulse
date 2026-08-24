@@ -6,8 +6,8 @@ export const DEFAULT_SETTINGS = {
   pushAlerts: true,
   smsAlerts: false,
   whatsappAlerts: false,
-  autoRotateProxyOnRateLimit: true,
-  maintainStickyMobileIp: false,
+  autoRotateProxyOnRateLimit: false,
+  maintainStickyMobileIp: true,
   multiloginEndpoint: "http://localhost:35462",
   multiloginStatePolicy: "save_profile_state_on_user_action",
 };
@@ -38,6 +38,7 @@ export function buildDeepLink(
     minTickets: number;
     maxPrice: number | null;
     normalTicketsOnly: boolean;
+    evenTicketQuantitiesOnly?: boolean;
   },
 ) {
   const normalized = /^https?:\/\//i.test(url) ? url : `https://${url}`;
@@ -51,6 +52,9 @@ export function buildDeepLink(
   }
   if (filters.normalTicketsOnly) {
     link.searchParams.set("ticketType", "standard");
+  }
+  if (filters.evenTicketQuantitiesOnly) {
+    link.searchParams.set("quantityRule", "even");
   }
   return link.toString();
 }

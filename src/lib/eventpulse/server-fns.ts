@@ -41,6 +41,9 @@ export const addTargetFn = createServerFn({ method: "POST" })
       minTickets: z.number().int().min(1).max(10),
       maxPrice: z.number().nullable().default(null),
       normalTicketsOnly: z.boolean().default(true),
+      evenTicketQuantitiesOnly: z.boolean().default(false),
+      monitorStartsAt: z.string().nullable().default(null),
+      monitorEndsAt: z.string().nullable().default(null),
     }),
   )
   .handler(async ({ data }) => {
