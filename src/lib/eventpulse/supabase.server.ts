@@ -119,6 +119,8 @@ type AlertRow = {
   delivered_push: boolean;
   delivered_sms: boolean;
   delivered_whatsapp: boolean;
+  delivered_telegram?: boolean;
+  delivered_discord?: boolean;
   created_at: string;
 };
 
@@ -128,6 +130,8 @@ type SettingsRow = {
   push_alerts: boolean;
   sms_alerts: boolean;
   whatsapp_alerts: boolean;
+  telegram_alerts?: boolean;
+  discord_alerts?: boolean;
   auto_rotate_proxy_on_rate_limit: boolean;
   maintain_sticky_mobile_ip: boolean;
   multilogin_endpoint: string;
@@ -284,6 +288,8 @@ export async function saveSettings(input: SaveSettingsInput) {
     push_alerts: input.pushAlerts,
     sms_alerts: input.smsAlerts,
     whatsapp_alerts: input.whatsappAlerts,
+    telegram_alerts: input.telegramAlerts,
+    discord_alerts: input.discordAlerts,
     auto_rotate_proxy_on_rate_limit: input.autoRotateProxyOnRateLimit,
     maintain_sticky_mobile_ip: input.maintainStickyMobileIp,
     multilogin_endpoint: input.multiloginEndpoint,
@@ -297,8 +303,16 @@ export async function saveSettings(input: SaveSettingsInput) {
       body,
     });
   } catch (error) {
-    if (!isMissingProfileSettingsColumn(error)) throw error;
+    if (
+      !isMissingProfileSettingsColumn(error) &&
+      !isMissingTelegramColumn(error) &&
+      !isMissingDiscordColumn(error)
+    ) {
+      throw error;
+    }
     const {
+      telegram_alerts: _telegramAlerts,
+      discord_alerts: _discordAlerts,
       auto_rotate_proxy_on_rate_limit: _autoRotateProxyOnRateLimit,
       maintain_sticky_mobile_ip: _maintainStickyMobileIp,
       ...legacyBody
@@ -438,6 +452,8 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
       pushSent: 0,
       smsSent: 0,
       whatsappSent: 0,
+      telegramSent: 0,
+      discordSent: 0,
       errors: ["Supabase is not configured."],
     };
   }
@@ -467,6 +483,8 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
     pushSent: 0,
     smsSent: 0,
     whatsappSent: 0,
+    telegramSent: 0,
+    discordSent: 0,
     errors: [],
   };
 
@@ -518,6 +536,8 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
     result.pushSent += delivery.pushSent;
     result.smsSent += delivery.smsSent;
     result.whatsappSent += delivery.whatsappSent;
+    result.telegramSent += delivery.telegramSent;
+    result.discordSent += delivery.discordSent;
     result.errors.push(...delivery.errors);
   }
 
@@ -595,8 +615,10 @@ function mapSettings(row: SettingsRow): BackendSettings {
     pushAlerts: row.push_alerts,
     smsAlerts: row.sms_alerts,
     whatsappAlerts: row.whatsapp_alerts,
-    autoRotateProxyOnRateLimit: row.auto_rotate_proxy_on_rate_limit ?? true,
-    maintainStickyMobileIp: row.maintain_sticky_mobile_ip ?? false,
+    telegramAlerts: row.telegram_alerts ?? false,
+    discordAlerts: row.discord_alerts ?? false,
+    autoRotateProxyOnRateLimit: row.auto_rotate_proxy_on_rate_limit ?? false,
+    maintainStickyMobileIp: row.maintain_sticky_mobile_ip ?? true,
     multiloginEndpoint: row.multilogin_endpoint,
     multiloginStatePolicy: row.multilogin_state_policy,
   };
@@ -615,6 +637,22 @@ function isMissingFolderIdColumn(error: unknown) {
   return (
     error instanceof Error &&
     error.message.includes("multilogin_folder_id") &&
+    error.message.includes("schema cache")
+  );
+}
+
+function isMissingTelegramColumn(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.message.includes("telegram_alerts") || error.message.includes("delivered_telegram")) &&
+    error.message.includes("schema cache")
+  );
+}
+
+function isMissingDiscordColumn(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.message.includes("discord_alerts") || error.message.includes("delivered_discord")) &&
     error.message.includes("schema cache")
   );
 }
@@ -776,7 +814,14 @@ async function deliverAlert(input: {
   settings: BackendSettings;
   subscriptions: PushSubscriptionRow[];
 }) {
-  const result = { pushSent: 0, smsSent: 0, whatsappSent: 0, errors: [] as string[] };
+  const result = {
+    pushSent: 0,
+    smsSent: 0,
+    whatsappSent: 0,
+    telegramSent: 0,
+    discordSent: 0,
+    errors: [] as string[],
+  };
 
   if (input.settings.pushAlerts && input.subscriptions.length > 0) {
     result.pushSent = await sendWebPush(
@@ -793,17 +838,15 @@ async function deliverAlert(input: {
   if (input.settings.whatsappAlerts) {
     result.whatsappSent = await sendTwilioMessage("whatsapp", input.body, result.errors);
   }
+  if (input.settings.telegramAlerts) {
+    result.telegramSent = await sendTelegramMessage(input.body, input.url, result.errors);
+  }
+  if (input.settings.discordAlerts) {
+    result.discordSent = await sendDiscordMessage(input.body, input.url, result.errors);
+  }
 
   if (input.alertId) {
-    await rest("eventpulse_alerts", {
-      method: "PATCH",
-      query: { id: `eq.${input.alertId}` },
-      body: {
-        delivered_push: result.pushSent > 0,
-        delivered_sms: result.smsSent > 0,
-        delivered_whatsapp: result.whatsappSent > 0,
-      },
-    });
+    await markAlertDelivered(input.alertId, result);
   }
 
   return result;
@@ -885,4 +928,99 @@ function parseRecipients(value: string | undefined) {
     .split(",")
     .map((recipient) => recipient.trim())
     .filter(Boolean);
+}
+
+async function sendTelegramMessage(body: string, url: string, errors: string[]) {
+  const token = process.env["TELEGRAM_BOT_TOKEN"];
+  const chatIds = parseRecipients(process.env["TELEGRAM_CHAT_IDS"]);
+  if (!token || chatIds.length === 0) {
+    errors.push("Telegram env missing; message not sent.");
+    return 0;
+  }
+
+  let sent = 0;
+  for (const chatId of chatIds) {
+    const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `${body}\n${url}`,
+        disable_web_page_preview: true,
+      }),
+    });
+
+    if (response.ok) {
+      sent += 1;
+    } else {
+      errors.push(`Telegram failed for ${chatId}: ${response.status}`);
+    }
+  }
+  return sent;
+}
+
+async function sendDiscordMessage(body: string, url: string, errors: string[]) {
+  const webhookUrls = parseRecipients(process.env["DISCORD_WEBHOOK_URLS"]);
+  if (webhookUrls.length === 0) {
+    errors.push("Discord env missing; message not sent.");
+    return 0;
+  }
+
+  let sent = 0;
+  for (const webhookUrl of webhookUrls) {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        content: `**HD-1 Drop Monitor**\n${body}\n${url}`,
+        allowed_mentions: { parse: [] },
+      }),
+    });
+
+    if (response.ok || response.status === 204) {
+      sent += 1;
+    } else {
+      errors.push(`Discord failed: ${response.status}`);
+    }
+  }
+  return sent;
+}
+
+async function markAlertDelivered(
+  alertId: string,
+  result: {
+    pushSent: number;
+    smsSent: number;
+    whatsappSent: number;
+    telegramSent: number;
+    discordSent: number;
+  },
+) {
+  const body = {
+    delivered_push: result.pushSent > 0,
+    delivered_sms: result.smsSent > 0,
+    delivered_whatsapp: result.whatsappSent > 0,
+    delivered_telegram: result.telegramSent > 0,
+    delivered_discord: result.discordSent > 0,
+  };
+
+  try {
+    await rest("eventpulse_alerts", {
+      method: "PATCH",
+      query: { id: `eq.${alertId}` },
+      body,
+    });
+  } catch (error) {
+    if (!isMissingTelegramColumn(error) && !isMissingDiscordColumn(error)) throw error;
+    const {
+      delivered_telegram: _deliveredTelegram,
+      delivered_discord: _deliveredDiscord,
+      ...legacyBody
+    } = body;
+    await rest("eventpulse_alerts", {
+      method: "PATCH",
+      query: { id: `eq.${alertId}` },
+      body: legacyBody,
+    });
+  }
 }

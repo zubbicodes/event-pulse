@@ -53,6 +53,8 @@ export interface BackendSettings {
   pushAlerts: boolean;
   smsAlerts: boolean;
   whatsappAlerts: boolean;
+  telegramAlerts: boolean;
+  discordAlerts: boolean;
   autoRotateProxyOnRateLimit: boolean;
   maintainStickyMobileIp: boolean;
   multiloginEndpoint: string;
@@ -131,5 +133,7 @@ export interface MonitorRunResult {
   pushSent: number;
   smsSent: number;
   whatsappSent: number;
+  telegramSent: number;
+  discordSent: number;
   errors: string[];
 }
