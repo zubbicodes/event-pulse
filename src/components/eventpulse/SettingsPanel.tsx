@@ -16,6 +16,8 @@ export function SettingsPanel({ settings }: { settings: BackendSettings }) {
   const [push, setPush] = useState(settings.pushAlerts);
   const [sms, setSms] = useState(settings.smsAlerts);
   const [whatsapp, setWhatsapp] = useState(settings.whatsappAlerts);
+  const [telegram, setTelegram] = useState(settings.telegramAlerts);
+  const [discord, setDiscord] = useState(settings.discordAlerts);
   const [multiloginEndpoint, setMultiloginEndpoint] = useState(settings.multiloginEndpoint);
   const [pushStatus, setPushStatus] = useState("Service worker registers automatically.");
   const [isPushBusy, setIsPushBusy] = useState(false);
@@ -57,6 +59,8 @@ export function SettingsPanel({ settings }: { settings: BackendSettings }) {
           pushAlerts: push,
           smsAlerts: sms,
           whatsappAlerts: whatsapp,
+          telegramAlerts: telegram,
+          discordAlerts: discord,
           autoRotateProxyOnRateLimit: settings.autoRotateProxyOnRateLimit,
           maintainStickyMobileIp: settings.maintainStickyMobileIp,
           multiloginEndpoint,
@@ -111,6 +115,14 @@ export function SettingsPanel({ settings }: { settings: BackendSettings }) {
         <label className="flex items-center justify-between gap-3 rounded-md bg-secondary/60 px-3 py-2.5 text-xs">
           WhatsApp Alerts
           <Switch checked={whatsapp} onCheckedChange={setWhatsapp} />
+        </label>
+        <label className="flex items-center justify-between gap-3 rounded-md bg-secondary/60 px-3 py-2.5 text-xs">
+          Telegram Alerts
+          <Switch checked={telegram} onCheckedChange={setTelegram} />
+        </label>
+        <label className="flex items-center justify-between gap-3 rounded-md bg-secondary/60 px-3 py-2.5 text-xs">
+          Discord Alerts
+          <Switch checked={discord} onCheckedChange={setDiscord} />
         </label>
       </div>
 

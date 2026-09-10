@@ -70,6 +70,8 @@ export const saveSettingsFn = createServerFn({ method: "POST" })
       pushAlerts: z.boolean(),
       smsAlerts: z.boolean(),
       whatsappAlerts: z.boolean(),
+      telegramAlerts: z.boolean(),
+      discordAlerts: z.boolean(),
       autoRotateProxyOnRateLimit: z.boolean(),
       maintainStickyMobileIp: z.boolean(),
       multiloginEndpoint: z.string().min(1),

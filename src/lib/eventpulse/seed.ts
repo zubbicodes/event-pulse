@@ -6,6 +6,8 @@ export const DEFAULT_SETTINGS = {
   pushAlerts: true,
   smsAlerts: false,
   whatsappAlerts: false,
+  telegramAlerts: false,
+  discordAlerts: false,
   autoRotateProxyOnRateLimit: false,
   maintainStickyMobileIp: true,
   multiloginEndpoint: "http://localhost:35462",
