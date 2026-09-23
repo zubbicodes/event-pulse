@@ -7,6 +7,7 @@ import { MonitorGrid } from "@/components/eventpulse/MonitorGrid";
 import { ProfilePanel } from "@/components/eventpulse/ProfilePanel";
 import { AlertLog } from "@/components/eventpulse/AlertLog";
 import { SettingsPanel } from "@/components/eventpulse/SettingsPanel";
+import { SectionModal } from "@/components/eventpulse/SectionModal";
 import { getDashboardDataFn } from "@/lib/eventpulse/server-fns";
 
 export const Route = createFileRoute("/")({
@@ -36,6 +37,8 @@ export const Route = createFileRoute("/")({
 
 function Dashboard() {
   const [tab, setTab] = useState<NavId>("monitors");
+  const [modalTab, setModalTab] = useState<NavId>("monitors");
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [targetFormSignal, setTargetFormSignal] = useState(0);
   const { dashboard } = Route.useLoaderData();
   const sectionRefs = {
@@ -50,15 +53,23 @@ function Dashboard() {
     sectionRefs[nextTab].current?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
+  function openDesktopModal(nextTab: NavId) {
+    setTab(nextTab);
+    setModalTab(nextTab);
+    setIsModalOpen(true);
+  }
+
   function openTargetForm() {
     setTab("monitors");
+    setModalTab("monitors");
     setTargetFormSignal((value) => value + 1);
+    setIsModalOpen(true);
     sectionRefs.monitors.current?.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <SideRail active={tab} onSelect={selectTab} />
+      <SideRail active={tab} onSelect={openDesktopModal} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
@@ -113,6 +124,17 @@ function Dashboard() {
           </div>
         </main>
       </div>
+
+      <SectionModal
+        active={modalTab}
+        alerts={dashboard.alerts}
+        onOpenChange={setIsModalOpen}
+        open={isModalOpen}
+        profiles={dashboard.profiles}
+        settings={dashboard.settings}
+        targetFormSignal={targetFormSignal}
+        targets={dashboard.targets}
+      />
 
       <BottomNav active={tab} onSelect={selectTab} />
     </div>
