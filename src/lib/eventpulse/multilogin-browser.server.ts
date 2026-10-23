@@ -1,10 +1,16 @@
 import { lookup } from "node:dns/promises";
 import puppeteer, { type Page } from "puppeteer-core";
 
+// The client's Multilogin profiles that monitor targets may be assigned to. A profile only checks
+// pages once a target is assigned to it.
 const APPROVED_PROFILE_NAMES = new Set([
   "PERS - timothy.coughlan01@gmail.com",
   "PERS - jackbarnabysmith@gmail.com",
+  "PERS - jasraghwani99@gmail.com",
+  "PERS - kajnathwani@gmail.com",
 ]);
+const MULTILOGIN_API_URL = "https://api.multilogin.com";
+const PROXY_CACHE_MS = 10 * 60 * 1000;
 const MULTILOGIN_TIMEOUT_MS = 20_000;
 const TICKETMASTER_IDENTIFY_TIMEOUT_MS = 20_000;
 
@@ -106,7 +112,7 @@ export async function readRenderedTicketPage(input: RenderedPageInput) {
 
   const page = await browser.newPage();
   try {
-    await page.authenticate(proxyCredentialsFor(input.profileId));
+    await page.authenticate(await proxyCredentialsFor(input.profileId, token));
     page.setDefaultNavigationTimeout(MULTILOGIN_TIMEOUT_MS);
     let latestNavigationStatus: number | null = null;
     page.on("response", (response) => {
@@ -136,23 +142,62 @@ export async function readRenderedTicketPage(input: RenderedPageInput) {
   }
 }
 
-function proxyCredentialsFor(profileId: string): ProxyCredentials {
+// MULTILOGIN_PROXY_CREDENTIALS overrides per profile; otherwise the credentials of the proxy saved
+// on the Multilogin profile are used, so any approved profile works without editing env vars.
+async function proxyCredentialsFor(profileId: string, token: string): Promise<ProxyCredentials> {
   const raw = process.env["MULTILOGIN_PROXY_CREDENTIALS"];
-  if (!raw) throw new Error("MULTILOGIN_PROXY_CREDENTIALS is missing.");
-
-  let credentialsByProfile: Record<string, Partial<ProxyCredentials>>;
-  try {
-    credentialsByProfile = JSON.parse(raw) as Record<string, Partial<ProxyCredentials>>;
-  } catch {
-    throw new Error("MULTILOGIN_PROXY_CREDENTIALS must be valid JSON.");
+  if (raw) {
+    let credentialsByProfile: Record<string, Partial<ProxyCredentials>>;
+    try {
+      credentialsByProfile = JSON.parse(raw) as Record<string, Partial<ProxyCredentials>>;
+    } catch {
+      throw new Error("MULTILOGIN_PROXY_CREDENTIALS must be valid JSON.");
+    }
+    const credentials = credentialsByProfile[profileId];
+    if (credentials?.username && credentials.password) {
+      return { username: credentials.username, password: credentials.password };
+    }
   }
 
-  const credentials = credentialsByProfile[profileId];
-  if (!credentials?.username || !credentials.password) {
+  const credentials = (await loadWorkspaceProxyCredentials(token)).get(profileId);
+  if (!credentials) {
     throw new Error(`Proxy credentials are missing for Multilogin profile: ${profileId}`);
   }
+  return credentials;
+}
 
-  return { username: credentials.username, password: credentials.password };
+let workspaceProxyCache: { loadedAt: number; byProfile: Map<string, ProxyCredentials> } | null =
+  null;
+
+async function loadWorkspaceProxyCredentials(token: string) {
+  if (workspaceProxyCache && Date.now() - workspaceProxyCache.loadedAt < PROXY_CACHE_MS) {
+    return workspaceProxyCache.byProfile;
+  }
+
+  const response = await fetch(`${MULTILOGIN_API_URL}/profile/search`, {
+    method: "POST",
+    headers: { ...launcherHeaders(token), "content-type": "application/json" },
+    body: JSON.stringify({ is_removed: false, limit: 100, offset: 0, search_text: "" }),
+    signal: AbortSignal.timeout(MULTILOGIN_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`Multilogin profile search failed (${response.status}).`);
+  }
+
+  const body = (await response.json()) as {
+    data?: { profiles?: { id?: string; proxy?: { username?: string; password?: string } }[] };
+  };
+  const byProfile = new Map<string, ProxyCredentials>();
+  for (const profile of body.data?.profiles ?? []) {
+    if (profile.id && profile.proxy?.username && profile.proxy.password) {
+      byProfile.set(profile.id, {
+        username: profile.proxy.username,
+        password: profile.proxy.password,
+      });
+    }
+  }
+  workspaceProxyCache = { loadedAt: Date.now(), byProfile };
+  return byProfile;
 }
 
 async function waitForTicketmasterIdentification(page: Page) {

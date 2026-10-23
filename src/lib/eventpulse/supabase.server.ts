@@ -24,6 +24,14 @@ import {
   readRenderedTicketPage,
 } from "./multilogin-browser.server";
 import { ChannelQueue, parseRetryAfterMs, type ChannelSendResult } from "./channel-queue.server";
+import {
+  getProfilePause,
+  isProfilePaused,
+  pauseProfileManually,
+  recordProfileBlock,
+  recordProfileSuccess,
+  resumeProfile,
+} from "./profile-pause.server";
 
 const SUPABASE_URL =
   process.env["SUPABASE_URL"] ??
@@ -286,6 +294,25 @@ export async function setTargetStatus(id: string, status: BackendMonitorTarget["
   return row ? mapTarget(row) : undefined;
 }
 
+// Moves a target onto another saved profile; the proxy label follows the profile.
+export async function setTargetProfile(id: string, profileName: string) {
+  const [profile] = await rest<ProfileRow[]>("eventpulse_profiles", {
+    query: { select: "*", profile_name: `eq.${profileName}`, limit: "1" },
+  });
+  if (!profile) throw new Error(`Profile not found: ${profileName}`);
+
+  const [row] = await rest<TargetRow[]>("eventpulse_targets", {
+    method: "PATCH",
+    query: { id: `eq.${id}` },
+    prefer: "return=representation",
+    body: {
+      profile_name: profile.profile_name,
+      proxy_label: profile.sticky_ip_label ?? profile.region,
+    },
+  });
+  return row ? mapTarget(row) : undefined;
+}
+
 export async function deleteTarget(id: string) {
   await rest("eventpulse_targets", {
     method: "DELETE",
@@ -540,10 +567,32 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
   const deliveries: Promise<DeliveryResult>[] = [];
   try {
     for (const row of dueTargets) {
+      // Re-checked per target: an earlier target in this pass may have just paused the profile.
+      if (isProfilePaused(row.profile_name)) continue;
       result.checked += 1;
       const target = mapTarget(row, settings.refreshSeconds);
       const check = await checkTarget(target, settings, profilesByName.get(target.profile));
+
+      // After every (re)deploy the launcher downloads its browser engine before the first profile
+      // can start. That is start-up, not a failed check: keep the target's last snapshot, skip
+      // the per-target alert, and announce the warm-up once.
+      if (check.error && /downloading of core/i.test(check.error)) {
+        result.checked -= 1;
+        if (!launcherWarmUpAnnounced && hasEnabledDeliveryChannel(settings)) {
+          launcherWarmUpAnnounced = true;
+          deliveries.push(announceLauncherWarmUp(dueTargets.length, settings, subscriptions));
+          result.alertsCreated += 1;
+        }
+        continue;
+      }
+      launcherWarmUpAnnounced = false;
+
       const now = new Date().toISOString();
+      const pause =
+        check.statusCode === 403 || check.statusCode === 429
+          ? recordProfileBlock(target.profile, check.statusCode)
+          : null;
+      const recovered = !pause && check.error == null && recordProfileSuccess(target.profile);
       await rest("eventpulse_targets", {
         method: "PATCH",
         query: { id: `eq.${row.id}` },
@@ -563,7 +612,7 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
         check.availability !== row.availability || check.status !== row.status;
       if (!hasEnabledDeliveryChannel(settings)) continue;
 
-      const alertMessage =
+      const snapshotMessage =
         firstObservation || snapshotChanged
           ? buildTicketAlertMessage(
               target.event,
@@ -572,6 +621,24 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
               firstObservation,
             )
           : buildScheduledTicketSnapshotMessage(target.event, check.availability, now);
+      const alertMessage = pause
+        ? [
+            target.event,
+            check.statusCode === 429
+              ? "Ticketmaster rate limited this profile (HTTP 429)."
+              : "Ticketmaster blocked this profile with an identity check (HTTP 403).",
+            `All checks on profile "${target.profile}" are paused until ${formatUtcTime(pause.pausedUntil)} UTC (pause ${pause.blockLevel}), then retried automatically.`,
+            "Resume or extend the pause under MultiLogin & Proxy Profiles in the dashboard.",
+            `Current: ${check.availability}`,
+          ]
+            .join("\n")
+            .slice(0, 1800)
+        : recovered
+          ? `Ticketmaster access restored for profile "${target.profile}"; checks resumed.\n${snapshotMessage}`.slice(
+              0,
+              1800,
+            )
+          : snapshotMessage;
       const [alert] = await rest<AlertRow[]>("eventpulse_alerts", {
         method: "POST",
         prefer: "return=representation",
@@ -594,7 +661,7 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
       deliveries.push(
         deliverAlert({
           ...(alert?.id ? { alertId: alert.id } : {}),
-          title: ticketAlertTitle(check.status),
+          title: ticketAlertTitle(check, Boolean(pause), recovered),
           body: alertMessage,
           url: target.deepLink,
           settings,
@@ -614,6 +681,34 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
   }
 
   return result;
+}
+
+// True while the launcher is still preparing its browser engine and the start-up alert went out.
+let launcherWarmUpAnnounced = false;
+
+async function announceLauncherWarmUp(
+  targetCount: number,
+  settings: BackendSettings,
+  subscriptions: PushSubscriptionRow[],
+): Promise<DeliveryResult> {
+  const body = [
+    "Ticket monitoring restarted",
+    `Preparing the monitoring browser; checks for ${targetCount} target${targetCount === 1 ? "" : "s"} resume automatically in about a minute.`,
+    `Started: ${new Date().toISOString()}`,
+  ].join("\n");
+  const [alert] = await rest<AlertRow[]>("eventpulse_alerts", {
+    method: "POST",
+    prefer: "return=representation",
+    body: { target_id: null, tone: "info", message: body, deep_link: null },
+  });
+  return await deliverAlert({
+    ...(alert?.id ? { alertId: alert.id } : {}),
+    title: "🔄 HD-1: monitor starting up",
+    body,
+    url: process.env["EVENTPULSE_PUBLIC_URL"] ?? "",
+    settings,
+    subscriptions,
+  });
 }
 
 const MONITOR_FAILURE_REPEAT_MS = 15 * 60 * 1000;
@@ -684,11 +779,22 @@ async function deliverOperationalAlert(title: string, body: string) {
 }
 
 // Same title on every channel, so a ticket drop stands out from routine snapshot alerts.
-function ticketAlertTitle(status: BackendMonitorTarget["status"]) {
-  if (status === "available") return "🟢 HD-1: TICKETS AVAILABLE";
-  if (status === "captcha") return "⚠️ HD-1: captcha challenge";
-  if (status === "limited") return "⚠️ HD-1: rate limited or check failed";
+function ticketAlertTitle(check: MonitorCheckResult, paused: boolean, recovered: boolean) {
+  if (check.status === "available") return "🟢 HD-1: TICKETS AVAILABLE";
+  if (check.statusCode === 403) {
+    return `⛔ HD-1: blocked by Ticketmaster (identity check)${paused ? ", profile paused" : ""}`;
+  }
+  if (check.statusCode === 429) {
+    return `⏳ HD-1: rate limited by Ticketmaster${paused ? ", profile paused" : ""}`;
+  }
+  if (recovered) return "✅ HD-1: profile unblocked, checks resumed";
+  if (check.status === "captcha") return "⚠️ HD-1: captcha challenge";
+  if (check.status === "limited") return "⚠️ HD-1: check failed";
   return "HD-1 Drop Monitor ticket alert";
+}
+
+function formatUtcTime(iso: string) {
+  return iso.slice(11, 16);
 }
 
 function addDeliveryResult(result: MonitorRunResult, delivery: DeliveryResult) {
@@ -749,7 +855,17 @@ function mapProfile(row: ProfileRow): BackendProfileRow {
     multiloginProfileId: row.multilogin_profile_id,
     multiloginFolderId: row.multilogin_folder_id,
     lastSessionSavedAt: row.last_session_saved_at,
+    pause: getProfilePause(row.profile_name),
   };
+}
+
+export function pauseProfile(profileName: string, minutes: number | null) {
+  return pauseProfileManually(profileName, minutes);
+}
+
+export function resumeProfileChecks(profileName: string) {
+  resumeProfile(profileName);
+  return { ok: true };
 }
 
 function mapAlert(row: AlertRow): BackendAlertLog {

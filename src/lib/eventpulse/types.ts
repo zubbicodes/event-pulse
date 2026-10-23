@@ -37,6 +37,14 @@ export interface BackendProfileRow {
   multiloginProfileId: string | null;
   multiloginFolderId: string | null;
   lastSessionSavedAt: string | null;
+  // Set while the scheduler skips this profile (Ticketmaster block cooldown or manual pause).
+  pause: ProfilePause | null;
+}
+
+export interface ProfilePause {
+  pausedUntil: string | null;
+  reason: string;
+  manual: boolean;
 }
 
 export interface BackendAlertLog {

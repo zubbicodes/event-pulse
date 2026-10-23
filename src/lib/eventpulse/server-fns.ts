@@ -6,10 +6,13 @@ import {
   insertTarget,
   launchMultiloginProfile,
   loadDashboardData,
+  pauseProfile,
+  resumeProfileChecks,
   saveProfileSession,
   savePushSubscription,
   saveSettings,
   sendTestAlert,
+  setTargetProfile,
   setTargetStatus,
   upsertProfile,
 } from "./supabase.server";
@@ -55,6 +58,12 @@ export const updateTargetStatusFn = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string().min(1), status: targetStatusSchema }))
   .handler(async ({ data }) => {
     return await setTargetStatus(data.id, data.status);
+  });
+
+export const updateTargetProfileFn = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1), profileName: z.string().min(1) }))
+  .handler(async ({ data }) => {
+    return await setTargetProfile(data.id, data.profileName);
   });
 
 export const deleteTargetFn = createServerFn({ method: "POST" })
@@ -146,3 +155,25 @@ export const savePushSubscriptionFn = createServerFn({ method: "POST" })
 export const sendTestAlertFn = createServerFn({ method: "POST" }).handler(async () => {
   return await sendTestAlert();
 });
+
+export const pauseProfileFn = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      profileName: z.string().min(1),
+      minutes: z
+        .number()
+        .int()
+        .min(1)
+        .max(24 * 60)
+        .nullable(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    return pauseProfile(data.profileName, data.minutes);
+  });
+
+export const resumeProfileFn = createServerFn({ method: "POST" })
+  .validator(z.object({ profileName: z.string().min(1) }))
+  .handler(async ({ data }) => {
+    return resumeProfileChecks(data.profileName);
+  });

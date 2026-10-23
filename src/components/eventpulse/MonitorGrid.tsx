@@ -9,7 +9,12 @@ import { cn } from "@/lib/utils";
 import { PLATFORM_FILTERS, STATUS_META } from "@/lib/eventpulse-data";
 import type { Platform } from "@/lib/eventpulse-data";
 import type { BackendMonitorTarget, BackendProfileRow } from "@/lib/eventpulse/types";
-import { addTargetFn, deleteTargetFn, updateTargetStatusFn } from "@/lib/eventpulse/server-fns";
+import {
+  addTargetFn,
+  deleteTargetFn,
+  updateTargetProfileFn,
+  updateTargetStatusFn,
+} from "@/lib/eventpulse/server-fns";
 
 const DEFAULT_PLATFORM: Platform = "Ticketmaster UK/WW";
 
@@ -43,7 +48,9 @@ export function MonitorGrid({
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reassigningId, setReassigningId] = useState<string | null>(null);
   const addTarget = useServerFn(addTargetFn);
+  const updateTargetProfile = useServerFn(updateTargetProfileFn);
   const deleteTarget = useServerFn(deleteTargetFn);
   const updateTargetStatus = useServerFn(updateTargetStatusFn);
   const router = useRouter();
@@ -82,6 +89,21 @@ export function MonitorGrid({
   async function setStatus(id: string, status: BackendMonitorTarget["status"]) {
     await updateTargetStatus({ data: { id, status } });
     await router.invalidate();
+  }
+
+  async function changeProfile(target: BackendMonitorTarget, profileName: string) {
+    if (profileName === target.profile) return;
+    setReassigningId(target.id);
+    setStatusMessage("");
+    try {
+      await updateTargetProfile({ data: { id: target.id, profileName } });
+      setStatusMessage(`${target.event} now checks through ${profileName}.`);
+      await router.invalidate();
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : "Profile change failed.");
+    } finally {
+      setReassigningId(null);
+    }
   }
 
   async function removeTarget(id: string, eventName: string) {
@@ -192,12 +214,26 @@ export function MonitorGrid({
               placeholder="Max price"
               className="text-xs"
             />
-            <Input
+            <select
+              aria-label="MultiLogin profile"
               value={form.profile}
-              onChange={(event) => setForm((value) => ({ ...value, profile: event.target.value }))}
-              placeholder="Profile name (optional)"
-              className="text-xs"
-            />
+              onChange={(event) => {
+                const profile = profiles.find((p) => p.name === event.target.value);
+                setForm((value) => ({
+                  ...value,
+                  profile: event.target.value,
+                  proxy: profile?.stickyIp ?? value.proxy,
+                }));
+              }}
+              className="rounded-md border border-input bg-background px-3 py-2 text-xs"
+            >
+              {profiles.length === 0 && <option value="">No profiles saved</option>}
+              {profiles.map((profile) => (
+                <option key={profile.name} value={profile.name}>
+                  {profileOptionLabel(profile)}
+                </option>
+              ))}
+            </select>
             <Input
               value={form.proxy}
               onChange={(event) => setForm((value) => ({ ...value, proxy: event.target.value }))}
@@ -309,9 +345,23 @@ export function MonitorGrid({
                 </div>
                 <div className="flex min-w-0 items-center gap-1.5">
                   <UserRound className="h-3.5 w-3.5 shrink-0 text-online" />
-                  <span className="truncate">
-                    {t.profile} ({t.proxy})
-                  </span>
+                  <select
+                    aria-label={`Profile for ${t.event}`}
+                    value={t.profile}
+                    disabled={reassigningId === t.id}
+                    onChange={(event) => void changeProfile(t, event.target.value)}
+                    className="h-7 min-w-0 max-w-full truncate rounded-md border border-input bg-background px-1.5 text-[11px] text-foreground"
+                  >
+                    {!profiles.some((p) => p.name === t.profile) && (
+                      <option value={t.profile}>{t.profile || "No profile"} (not saved)</option>
+                    )}
+                    {profiles.map((profile) => (
+                      <option key={profile.name} value={profile.name}>
+                        {profileOptionLabel(profile)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="hidden truncate sm:inline">({t.proxy})</span>
                 </div>
                 <div className="text-muted-foreground">{formatTargetRules(t)}</div>
                 <div className="text-muted-foreground">{formatMonitorWindow(t)}</div>
@@ -356,6 +406,10 @@ export function MonitorGrid({
       </div>
     </section>
   );
+}
+
+function profileOptionLabel(profile: BackendProfileRow) {
+  return profile.pause ? `${profile.name} (paused)` : profile.name;
 }
 
 function toIsoOrNull(value: string) {

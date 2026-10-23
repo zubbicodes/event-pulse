@@ -8,6 +8,7 @@ import { ProfilePanel } from "@/components/eventpulse/ProfilePanel";
 import { AlertLog } from "@/components/eventpulse/AlertLog";
 import { SettingsPanel } from "@/components/eventpulse/SettingsPanel";
 import { SectionModal } from "@/components/eventpulse/SectionModal";
+import { ProfilePauseBanner } from "@/components/eventpulse/ProfilePauseBanner";
 import { getDashboardDataFn } from "@/lib/eventpulse/server-fns";
 
 export const Route = createFileRoute("/")({
@@ -81,6 +82,10 @@ function Dashboard() {
         />
 
         <main className="flex-1 space-y-5 px-4 pb-24 pt-4 lg:px-6 lg:pb-8">
+          <ProfilePauseBanner
+            profiles={dashboard.profiles}
+            onViewProfiles={() => selectTab("profiles")}
+          />
           <SummaryBar stats={dashboard.stats} />
 
           {/* Mobile: one section at a time via bottom nav */}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Play, Trash2 } from "lucide-react";
+import { Pause, Play, Trash2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,10 +9,20 @@ import type { BackendProfileRow, BackendSettings } from "@/lib/eventpulse/types"
 import {
   deleteProfileFn,
   launchProfileFn,
+  pauseProfileFn,
+  resumeProfileFn,
   saveProfileSessionFn,
   saveSettingsFn,
   upsertProfileFn,
 } from "@/lib/eventpulse/server-fns";
+import { formatPauseUntil } from "@/lib/eventpulse-data";
+
+const PAUSE_OPTIONS = [
+  { value: "15", label: "15 min" },
+  { value: "60", label: "1 hour" },
+  { value: "360", label: "6 hours" },
+  { value: "manual", label: "Until resumed" },
+];
 
 export function ProfilePanel({
   profiles,
@@ -27,6 +37,8 @@ export function ProfilePanel({
   const [showForm, setShowForm] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [deletingProfileName, setDeletingProfileName] = useState<string | null>(null);
+  const [pauseChoice, setPauseChoice] = useState<Record<string, string>>({});
+  const [pausingProfileName, setPausingProfileName] = useState<string | null>(null);
   const [profileForm, setProfileForm] = useState({
     profileName: "",
     region: "",
@@ -42,6 +54,8 @@ export function ProfilePanel({
   const saveSettings = useServerFn(saveSettingsFn);
   const deleteProfile = useServerFn(deleteProfileFn);
   const upsertProfile = useServerFn(upsertProfileFn);
+  const pauseProfile = useServerFn(pauseProfileFn);
+  const resumeProfile = useServerFn(resumeProfileFn);
   const router = useRouter();
 
   async function saveState(profile: BackendProfileRow) {
@@ -121,6 +135,28 @@ export function ProfilePanel({
       setMessage(result.message);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "MultiLogin launch failed.");
+    }
+  }
+
+  async function togglePause(profile: BackendProfileRow) {
+    setPausingProfileName(profile.name);
+    setMessage("");
+    try {
+      if (profile.pause) {
+        await resumeProfile({ data: { profileName: profile.name } });
+        setMessage(`${profile.name} resumed; its targets are checked again.`);
+      } else {
+        const choice = pauseChoice[profile.name] ?? "60";
+        await pauseProfile({
+          data: { profileName: profile.name, minutes: choice === "manual" ? null : Number(choice) },
+        });
+        setMessage(`${profile.name} paused; its targets are skipped until resumed or expired.`);
+      }
+      await router.invalidate();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Profile pause update failed.");
+    } finally {
+      setPausingProfileName(null);
     }
   }
 
@@ -232,10 +268,11 @@ export function ProfilePanel({
       )}
 
       <div className="scrollbar-hidden mt-3 -mx-4 overflow-x-auto px-4">
-        <table className="w-full min-w-[720px] border-collapse text-left text-xs">
+        <table className="w-full min-w-[960px] border-collapse text-left text-xs">
           <thead>
             <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
               <th className="py-2 pr-3 font-medium">Profile</th>
+              <th className="py-2 pr-3 font-medium">Monitoring</th>
               <th className="py-2 pr-3 font-medium">Assigned IP / Region</th>
               <th className="py-2 pr-3 font-medium">Cookies</th>
               <th className="py-2 pr-3 font-medium">TM Session</th>
@@ -246,7 +283,7 @@ export function ProfilePanel({
           <tbody>
             {profiles.length === 0 && (
               <tr className="border-t border-border">
-                <td className="py-4 pr-3 text-muted-foreground" colSpan={6}>
+                <td className="py-4 pr-3 text-muted-foreground" colSpan={7}>
                   No production profiles yet. Add or import MultiLogin profile metadata before
                   saving session state.
                 </td>
@@ -255,6 +292,20 @@ export function ProfilePanel({
             {profiles.map((p) => (
               <tr key={p.name} className="border-t border-border">
                 <td className="py-2.5 pr-3 font-mono font-semibold">{p.name}</td>
+                <td className="py-2.5 pr-3">
+                  {p.pause ? (
+                    <span
+                      className="rounded-full bg-alert/15 px-2 py-0.5 font-mono text-[11px] text-alert ring-1 ring-alert/30"
+                      title={p.pause.reason}
+                    >
+                      Paused {formatPauseUntil(p.pause)}
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-online/10 px-2 py-0.5 font-mono text-[11px] text-online ring-1 ring-online/25">
+                      Active
+                    </span>
+                  )}
+                </td>
                 <td className="py-2.5 pr-3 text-muted-foreground">{p.region}</td>
                 <td className="py-2.5 pr-3 text-online">{p.cookies}</td>
                 <td className="py-2.5 pr-3">
@@ -267,11 +318,37 @@ export function ProfilePanel({
                     {p.health}
                   </span>
                 </td>
-                <td className="py-2.5">
+                <td className="whitespace-nowrap py-2.5">
+                  {!p.pause && (
+                    <select
+                      aria-label={`Pause duration for ${p.name}`}
+                      className="h-7 rounded-md border border-input bg-background px-1.5 text-[11px]"
+                      value={pauseChoice[p.name] ?? "60"}
+                      onChange={(event) =>
+                        setPauseChoice((value) => ({ ...value, [p.name]: event.target.value }))
+                      }
+                    >
+                      {PAUSE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <Button
+                    size="sm"
+                    variant={p.pause ? "default" : "secondary"}
+                    className="ml-1 h-7 px-2 text-[11px]"
+                    disabled={pausingProfileName === p.name}
+                    onClick={() => void togglePause(p)}
+                  >
+                    {p.pause ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+                    {p.pause ? "Resume" : "Pause"}
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-7 px-2 text-[11px]"
+                    className="ml-2 h-7 px-2 text-[11px]"
                     disabled={!p.multiloginProfileId}
                     onClick={() => void launchProfileSession(p)}
                   >
