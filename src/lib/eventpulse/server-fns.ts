@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import {
+  checkTargetNow,
   deleteProfile,
   deleteTarget,
   insertTarget,
@@ -64,6 +65,12 @@ export const updateTargetProfileFn = createServerFn({ method: "POST" })
   .validator(z.object({ id: z.string().min(1), profileName: z.string().min(1) }))
   .handler(async ({ data }) => {
     return await setTargetProfile(data.id, data.profileName);
+  });
+
+export const checkTargetNowFn = createServerFn({ method: "POST" })
+  .validator(z.object({ id: z.string().min(1), sendAlert: z.boolean().default(false) }))
+  .handler(async ({ data }) => {
+    return await checkTargetNow(data.id, data.sendAlert);
   });
 
 export const deleteTargetFn = createServerFn({ method: "POST" })

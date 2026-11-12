@@ -11,13 +11,18 @@ import type {
   SavePushSubscriptionInput,
   SaveSettingsInput,
   MonitorRunResult,
+  CheckNowResult,
 } from "./types";
 import { DEFAULT_SETTINGS, buildDeepLink, getEmptyDashboardData } from "./seed";
+import { buildSampleTicketAlert } from "./sample-alert";
+import { interpretTicketPage, type MonitorCheckResult } from "./ticket-snapshot";
 import {
-  buildScheduledTicketSnapshotMessage,
-  buildTicketAlertMessage,
-  extractTicketPageSnapshot,
-} from "./ticket-snapshot";
+  buildTicketAlert,
+  escapeHtml,
+  findNewStock,
+  stockSnapshot,
+  type TicketAlertContent,
+} from "./ticket-inventory";
 import {
   getMultiloginTokenHealth,
   hasConfiguredScraperProxyPool,
@@ -166,15 +171,6 @@ type PushSubscriptionRow = {
   subscription: Record<string, unknown>;
 };
 
-type MonitorCheckResult = {
-  status: BackendMonitorTarget["status"];
-  availability: string;
-  responseMs: number;
-  statusCode: number | null;
-  error: string | null;
-  usesRotatingProxy: boolean;
-};
-
 export async function loadDashboardData(): Promise<DashboardData> {
   if (!isConfigured()) return getEmptyDashboardData();
 
@@ -227,6 +223,7 @@ export async function loadDashboardData(): Promise<DashboardData> {
               responseTimes.reduce((total, value) => total + value, 0) / responseTimes.length,
             ),
     },
+    profileMinIntervalSeconds: hasConfiguredScraperProxyPool() ? 0 : profileMinIntervalSeconds(),
     backendConnected: errors.length === 0,
     backendMessage:
       errors.length === 0 ? "Supabase connected." : (errors[0] ?? "Supabase load failed."),
@@ -504,12 +501,150 @@ export async function sendTestAlert() {
   }
 
   return await deliverAlert({
-    title: "HD-1 Drop Monitor test alert",
-    body: `Sent:${new Date().toISOString()}\nAll enabled alert channels are receiving monitor alerts.`,
-    url: process.env["EVENTPULSE_PUBLIC_URL"] ?? "",
+    // A sample in the real ticket-alert format, so every channel's rendering can be checked.
+    content: ticketAlertContent(buildSampleTicketAlert(new Date())),
     settings,
     subscriptions,
   });
+}
+
+// Portal "Check now" / "Check & send alert": the same real check the scheduler runs, through the
+// target's own Multilogin profile, on demand. With `sendAlert` the current stock is sent to every
+// enabled channel as a real ticket alert (even if it was reported before).
+export async function checkTargetNow(id: string, sendAlert: boolean): Promise<CheckNowResult> {
+  if (!isConfigured()) throw new Error("Supabase is not configured.");
+  const [targets, settingsRows, subscriptions, profiles] = await Promise.all([
+    rest<TargetRow[]>("eventpulse_targets", { query: { select: "*", id: `eq.${id}`, limit: "1" } }),
+    rest<SettingsRow[]>("eventpulse_settings", { query: { select: "*", limit: "1" } }),
+    rest<PushSubscriptionRow[]>("eventpulse_push_subscriptions", {
+      query: { select: "endpoint,subscription" },
+    }),
+    rest<ProfileRow[]>("eventpulse_profiles", { query: { select: "*" } }),
+  ]);
+  const row = targets[0];
+  if (!row) throw new Error("Target not found.");
+  const settings = settingsRows[0] ? mapSettings(settingsRows[0]) : DEFAULT_SETTINGS;
+  const target = mapTarget(row, settings.refreshSeconds);
+
+  const pause = getProfilePause(target.profile);
+  if (pause) {
+    return checkNowRefusal(
+      `Profile "${target.profile}" is paused ${pause.pausedUntil ? `until ${pause.pausedUntil.slice(11, 16)} UTC` : "until resumed"} (${pause.reason}). Resume it under MultiLogin & Proxy Profiles first.`,
+    );
+  }
+  const wait = hasConfiguredScraperProxyPool() ? 0 : profileWaitSeconds(target.profile);
+  if (wait > 0) {
+    return checkNowRefusal(
+      `Profile "${target.profile}" loaded a ticket page moments ago. Try again in ${wait}s; loading pages faster through one profile is what triggers Ticketmaster's identity check (HTTP 403).`,
+    );
+  }
+
+  const result: MonitorRunResult = {
+    checked: 1,
+    alertsCreated: 0,
+    pushSent: 0,
+    smsSent: 0,
+    whatsappSent: 0,
+    telegramSent: 0,
+    discordSent: 0,
+    errors: [],
+  };
+  const context: AlertContext = { settings, subscriptions, result, deliveries: [] };
+  const check = await checkTarget(
+    target,
+    settings,
+    profiles.find((profile) => profile.profile_name === target.profile),
+  );
+  // Launcher start-up or a profile open elsewhere: not a result. Leave the target as is.
+  if (check.kind === "failed" && check.error && /downloading of core/i.test(check.error)) {
+    return checkNowRefusal(
+      "Multilogin is still downloading its browser engine (first start). Try again in a minute.",
+    );
+  }
+  if (check.kind === "failed" && check.error && /can'?t lock profile/i.test(check.error)) {
+    return checkNowRefusal(
+      `Profile "${target.profile}" is open somewhere else (the production monitor or a Multilogin window), so this Multilogin cannot open it. Close it there, or check from the server that holds it.`,
+    );
+  }
+  const alertSent = await handleCheckResult(row, target, check, context, sendAlert);
+  for (const outcome of await Promise.allSettled(context.deliveries)) {
+    if (outcome.status === "fulfilled") addDeliveryResult(result, outcome.value);
+    else result.errors.push(`Alert delivery failed: ${formatUnknownError(outcome.reason)}`);
+  }
+
+  const alert =
+    check.report && check.report.totalStock > 0
+      ? buildTicketAlert({ report: check.report, url: target.deepLink, checkedAt: new Date() }).text
+      : null;
+  return {
+    checked: true,
+    kind: check.kind,
+    status: check.status,
+    summary: check.availability || check.error || "",
+    statusCode: check.statusCode,
+    alertPreview: alert,
+    alertSent,
+    delivered: {
+      push: result.pushSent,
+      telegram: result.telegramSent,
+      discord: result.discordSent,
+      sms: result.smsSent,
+      whatsapp: result.whatsappSent,
+    },
+    message: describeCheckNow(check, sendAlert, alertSent, hasEnabledDeliveryChannel(settings)),
+    errors: result.errors,
+  };
+}
+
+function checkNowRefusal(message: string): CheckNowResult {
+  return {
+    checked: false,
+    kind: null,
+    status: null,
+    summary: "",
+    statusCode: null,
+    alertPreview: null,
+    alertSent: false,
+    delivered: { push: 0, telegram: 0, discord: 0, sms: 0, whatsapp: 0 },
+    message,
+    errors: [],
+  };
+}
+
+function describeCheckNow(
+  check: MonitorCheckResult,
+  sendAlert: boolean,
+  alertSent: boolean,
+  channelsEnabled: boolean,
+) {
+  if (check.kind === "blocked") {
+    return `Ticketmaster refused the page with HTTP ${check.statusCode} (identity check / rate limit). The profile is paused and retried automatically.`;
+  }
+  if (check.kind === "captcha")
+    return "The page showed a captcha challenge; no stock could be read.";
+  if (check.kind === "gone")
+    return "The event page no longer exists; monitoring for it has stopped.";
+  if (check.kind === "failed") return `Check failed: ${check.error}`;
+  if (!check.report?.totalStock) return "Checked: no tickets matching this target's filters.";
+  if (!sendAlert) return "Checked: matching tickets found. Use “Check & send alert” to notify.";
+  if (!channelsEnabled) return "Tickets found, but no alert channel is enabled in Settings.";
+  return alertSent ? "Tickets found and the alert was sent." : "Tickets found; alert not sent.";
+}
+
+// Minimum seconds between two ticket-page loads through the same Multilogin profile.
+function profileMinIntervalSeconds() {
+  const value = Number(process.env["EVENTPULSE_PROFILE_MIN_INTERVAL_SECONDS"] ?? 60);
+  return Number.isFinite(value) ? Math.min(Math.max(Math.round(value), 0), 3600) : 60;
+}
+
+// When each profile last loaded a ticket page (scheduler or portal).
+const profileLastLoadAt = new Map<string, number>();
+
+function profileWaitSeconds(profileName: string) {
+  const last = profileLastLoadAt.get(profileName);
+  if (!last) return 0;
+  const remaining = profileMinIntervalSeconds() * 1000 - (Date.now() - last);
+  return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
 }
 
 export async function runMonitorPass(): Promise<MonitorRunResult> {
@@ -566,121 +701,29 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
     result.errors.push(`MultiLogin token warning failed: ${formatUnknownError(error)}`);
   }
 
-  const deliveries: Promise<DeliveryResult>[] = [];
+  const context: AlertContext = { settings, subscriptions, result, deliveries: [] };
   try {
     for (const row of dueTargets) {
       // Re-checked per target: an earlier target in this pass may have just paused the profile.
       if (isProfilePaused(row.profile_name)) continue;
-      result.checked += 1;
+      // One profile (one sticky IP) never loads ticket pages faster than the profile interval;
+      // targets wait their turn instead (they are ordered by last check, oldest first).
+      if (!hasConfiguredScraperProxyPool() && profileWaitSeconds(row.profile_name) > 0) continue;
       const target = mapTarget(row, settings.refreshSeconds);
       const check = await checkTarget(target, settings, profilesByName.get(target.profile));
 
       // After every (re)deploy the launcher downloads its browser engine before the first profile
-      // can start. That is start-up, not a failed check: keep the target's last snapshot, skip
-      // the per-target alert, and announce the warm-up once.
-      if (check.error && /downloading of core/i.test(check.error)) {
-        result.checked -= 1;
-        if (!launcherWarmUpAnnounced && hasEnabledDeliveryChannel(settings)) {
-          launcherWarmUpAnnounced = true;
-          deliveries.push(announceLauncherWarmUp(dueTargets.length, settings, subscriptions));
-          result.alertsCreated += 1;
-        }
+      // can start. That is start-up, not a failed check: leave the target untouched and move on.
+      if (check.kind === "failed" && check.error && /downloading of core/i.test(check.error)) {
+        console.info(`HD-1 launcher warming up; ${target.event} will be checked shortly.`);
         continue;
       }
-      launcherWarmUpAnnounced = false;
-
-      const now = new Date().toISOString();
-      const pause =
-        !check.usesRotatingProxy && (check.statusCode === 403 || check.statusCode === 429)
-          ? recordProfileBlock(target.profile, check.statusCode)
-          : null;
-      const recovered =
-        !check.usesRotatingProxy &&
-        !pause &&
-        check.error == null &&
-        recordProfileSuccess(target.profile);
-      await rest("eventpulse_targets", {
-        method: "PATCH",
-        query: { id: `eq.${row.id}` },
-        body: {
-          status: check.status,
-          availability: check.availability,
-          last_checked_at: now,
-          last_response_ms: check.responseMs,
-          last_status_code: check.statusCode,
-          last_error: check.error,
-          last_available_at: check.status === "available" ? now : row.last_available_at,
-        },
-      });
-
-      const firstObservation = !row.last_checked_at;
-      const snapshotChanged =
-        check.availability !== row.availability || check.status !== row.status;
-      if (!hasEnabledDeliveryChannel(settings)) continue;
-
-      // Keep captcha state visible in dashboard, but never create or deliver captcha alerts.
-      if (check.status === "captcha") continue;
-
-      const snapshotMessage =
-        firstObservation || snapshotChanged
-          ? buildTicketAlertMessage(
-              target.event,
-              row.availability,
-              check.availability,
-              firstObservation,
-            )
-          : buildScheduledTicketSnapshotMessage(target.event, check.availability, now);
-      const alertMessage = pause
-        ? [
-            target.event,
-            check.statusCode === 429
-              ? "Ticketmaster rate limited this profile (HTTP 429)."
-              : "Ticketmaster blocked this profile with an identity check (HTTP 403).",
-            `All checks on profile "${target.profile}" are paused until ${formatUtcTime(pause.pausedUntil)} UTC (pause ${pause.blockLevel}), then retried automatically.`,
-            "Resume or extend the pause under MultiLogin & Proxy Profiles in the dashboard.",
-            `Current: ${check.availability}`,
-          ]
-            .join("\n")
-            .slice(0, 1800)
-        : recovered
-          ? `Ticketmaster access restored for profile "${target.profile}"; checks resumed.\n${snapshotMessage}`.slice(
-              0,
-              1800,
-            )
-          : snapshotMessage;
-      const [alert] = await rest<AlertRow[]>("eventpulse_alerts", {
-        method: "POST",
-        prefer: "return=representation",
-        body: {
-          target_id: row.id,
-          tone:
-            check.status === "available"
-              ? "online"
-              : check.status === "captcha" || check.status === "limited"
-                ? "warn"
-                : "info",
-          message: alertMessage,
-          deep_link: target.deepLink,
-        },
-      });
-      result.alertsCreated += 1;
-
-      // Deliver in the background so a slow or rate-limited channel never delays the next check;
-      // every channel receives the same alert, and the pass waits for all of them before returning.
-      deliveries.push(
-        deliverAlert({
-          ...(alert?.id ? { alertId: alert.id } : {}),
-          title: ticketAlertTitle(check, Boolean(pause), recovered),
-          body: alertMessage,
-          url: target.deepLink,
-          settings,
-          subscriptions,
-        }),
-      );
+      result.checked += 1;
+      await handleCheckResult(row, target, check, context);
     }
   } finally {
     // Settle deliveries even if a target update throws, so none end as unhandled rejections.
-    for (const outcome of await Promise.allSettled(deliveries)) {
+    for (const outcome of await Promise.allSettled(context.deliveries)) {
       if (outcome.status === "rejected") {
         result.errors.push(`Alert delivery failed: ${formatUnknownError(outcome.reason)}`);
         continue;
@@ -692,32 +735,273 @@ export async function runMonitorPass(): Promise<MonitorRunResult> {
   return result;
 }
 
-// True while the launcher is still preparing its browser engine and the start-up alert went out.
-let launcherWarmUpAnnounced = false;
+type AlertContext = {
+  settings: BackendSettings;
+  subscriptions: PushSubscriptionRow[];
+  result: MonitorRunResult;
+  deliveries: Promise<DeliveryResult>[];
+};
 
-async function announceLauncherWarmUp(
-  targetCount: number,
-  settings: BackendSettings,
-  subscriptions: PushSubscriptionRow[],
-): Promise<DeliveryResult> {
-  const body = [
-    "Ticket monitoring restarted",
-    `Preparing the monitoring browser; checks for ${targetCount} target${targetCount === 1 ? "" : "s"} resume automatically in about a minute.`,
-    `Started: ${new Date().toISOString()}`,
-  ].join("\n");
+// Matched stock last reported per target (listing key -> quantity), so alerts fire only for new or
+// increased stock. After a restart it is rebuilt from the stored dashboard summary.
+const reportedStock = new Map<string, Map<string, number>>();
+// Targets whose page (no inventory data) last read as on sale; alerts fire on the transition only.
+const pageSignalOnSale = new Set<string>();
+// Consecutive failed checks per target.
+const failureStreaks = new Map<string, { count: number; key: string }>();
+
+// Failed checks only notify after this many in a row; the dashboard shows every failure.
+const FAILURE_NOTIFY_AFTER = 3;
+// The same operational notice (per profile / per error kind) repeats at most this often.
+const OPS_NOTICE_REPEAT_MS = 2 * 60 * 60 * 1000;
+
+// Returns true when a ticket alert was created. `forceTicketAlert` (portal "Check & send") sends
+// the current stock even when it was already reported.
+async function handleCheckResult(
+  row: TargetRow,
+  target: BackendMonitorTarget,
+  check: MonitorCheckResult,
+  context: AlertContext,
+  forceTicketAlert = false,
+): Promise<boolean> {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const update: Record<string, unknown> = {
+    status: check.status,
+    last_checked_at: nowIso,
+    last_response_ms: check.responseMs,
+    last_status_code: check.statusCode,
+    last_error: check.error,
+  };
+  // A failed or blocked check says nothing about stock: keep the last real availability text.
+  if (check.kind === "ok" || check.kind === "gone") {
+    update["availability"] = check.availability;
+    update["last_available_at"] = check.status === "available" ? nowIso : row.last_available_at;
+  }
+  await rest("eventpulse_targets", {
+    method: "PATCH",
+    query: { id: `eq.${row.id}` },
+    body: update,
+  });
+
+  if (check.kind === "blocked") {
+    await handleBlockedCheck(target, check, context);
+    return false;
+  }
+  if (check.kind === "captcha") return false;
+  if (check.kind === "gone") {
+    // The target is now paused, so it is not checked again until someone resumes it.
+    await clearFailure(target, context);
+    await createAndDeliverAlert(
+      {
+        targetId: row.id,
+        tone: "warn",
+        operational: true,
+        content: dashboardAlert(
+          "⏹ HD-1: event page removed",
+          `${target.event}: the ticket site no longer has this event page (HTTP ${check.statusCode}), usually because the event is over. Monitoring for it has stopped.\n${target.url}`,
+        ),
+      },
+      context,
+    );
+    return false;
+  }
+  if (check.kind === "failed") {
+    await handleFailedCheck(target, check, context);
+    return false;
+  }
+
+  // Successful check: clear failure/block state (one all-clear only if a notice went out).
+  await clearFailure(target, context);
+  if (!check.usesRotatingProxy && recordProfileSuccess(target.profile)) {
+    await resolveOpsNotice(
+      `blocked:${target.profile}`,
+      "✅ HD-1: profile checks resumed",
+      `Ticketmaster is answering profile "${target.profile}" again; ticket checks resumed.`,
+      context,
+    );
+  }
+
+  const report = check.report;
+  if (!report) return false;
+
+  if (report.inventoryKnown) {
+    pageSignalOnSale.delete(row.id);
+    const previous =
+      reportedStock.get(row.id) ??
+      (row.availability === check.availability ? stockSnapshot(report.matched) : null);
+    const newStock = findNewStock(previous, report.matched);
+    reportedStock.set(row.id, stockSnapshot(report.matched));
+    if (report.totalStock === 0) return false;
+    if (newStock.length === 0 && !forceTicketAlert) return false;
+  } else {
+    const onSale = check.status === "available";
+    const wasOnSale =
+      pageSignalOnSale.has(row.id) ||
+      (row.status === "available" && row.availability === check.availability);
+    if (onSale) pageSignalOnSale.add(row.id);
+    else pageSignalOnSale.delete(row.id);
+    if (!onSale) return false;
+    if (wasOnSale && !forceTicketAlert) return false;
+  }
+
+  await createAndDeliverAlert(
+    {
+      targetId: row.id,
+      tone: "online",
+      content: ticketAlertContent(
+        buildTicketAlert({ report, url: target.deepLink, checkedAt: now }),
+      ),
+    },
+    context,
+  );
+  return true;
+}
+
+async function handleBlockedCheck(
+  target: BackendMonitorTarget,
+  check: MonitorCheckResult,
+  context: AlertContext,
+) {
+  // With a rotating proxy pool each check uses a fresh IP, so a block is not a profile problem.
+  if (check.usesRotatingProxy) return;
+  const pause = recordProfileBlock(target.profile, check.statusCode ?? 403);
+  console.warn(
+    `HD-1 profile "${target.profile}" blocked (HTTP ${check.statusCode}); paused until ${pause.pausedUntil} (level ${pause.blockLevel}).`,
+  );
+  // One notice per block episode; the escalating pauses after it stay on the dashboard only.
+  if (pause.blockLevel !== 1) return;
+  await sendOpsNotice(
+    `blocked:${target.profile}`,
+    "⏸ HD-1: profile paused",
+    [
+      `Ticketmaster asked profile "${target.profile}" for ${check.statusCode === 429 ? "a slower request rate (HTTP 429)" : "identity verification (HTTP 403)"}.`,
+      "Its checks are paused and retried automatically. You will get one message when checks resume.",
+    ].join("\n"),
+    context,
+  );
+}
+
+async function handleFailedCheck(
+  target: BackendMonitorTarget,
+  check: MonitorCheckResult,
+  context: AlertContext,
+) {
+  const message = (check.error ?? "Unknown monitor error").replace(/\s+/g, " ").slice(0, 300);
+  const key = `failed:${failureKind(message)}`;
+  const previous = failureStreaks.get(target.id);
+  const count = previous?.key === key ? previous.count + 1 : 1;
+  failureStreaks.set(target.id, { count, key });
+  console.warn(`HD-1 check failed for ${target.event} (${count} in a row): ${message}`);
+  if (count !== FAILURE_NOTIFY_AFTER) return;
+
+  const affected = [...failureStreaks.values()].filter(
+    (streak) => streak.key === key && streak.count >= FAILURE_NOTIFY_AFTER,
+  ).length;
+  await sendOpsNotice(
+    key,
+    "⚠️ HD-1: ticket checks failing",
+    [
+      `${target.event} could not be checked ${FAILURE_NOTIFY_AFTER} times in a row${affected > 1 ? ` (${affected} targets affected)` : ""}.`,
+      `Reason: ${message}`,
+      "Checks keep retrying; you will get one message when they recover.",
+    ].join("\n"),
+    context,
+  );
+}
+
+async function clearFailure(target: BackendMonitorTarget, context: AlertContext) {
+  const streak = failureStreaks.get(target.id);
+  if (!streak) return;
+  failureStreaks.delete(target.id);
+  if ([...failureStreaks.values()].some((item) => item.key === streak.key)) return;
+  await resolveOpsNotice(
+    streak.key,
+    "✅ HD-1: ticket checks recovered",
+    "Targets are being checked normally again.",
+    context,
+  );
+}
+
+// Groups errors that differ only by ids, ports or timings into one notice.
+function failureKind(message: string) {
+  return message
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, "url")
+    .replace(/[0-9a-f]{8,}/g, "id")
+    .replace(/\d+/g, "n")
+    .slice(0, 80);
+}
+
+// Operational notices sent and not yet resolved, with when each was last sent.
+const opsNotices = new Map<string, number>();
+
+async function sendOpsNotice(key: string, title: string, body: string, context: AlertContext) {
+  const lastSent = opsNotices.get(key);
+  if (lastSent && Date.now() - lastSent < OPS_NOTICE_REPEAT_MS) return;
+  opsNotices.set(key, Date.now());
+  await createAndDeliverAlert(
+    { targetId: null, tone: "warn", content: dashboardAlert(title, body), operational: true },
+    context,
+  );
+}
+
+async function resolveOpsNotice(key: string, title: string, body: string, context: AlertContext) {
+  if (!opsNotices.delete(key)) return;
+  await createAndDeliverAlert(
+    { targetId: null, tone: "info", content: dashboardAlert(title, body), operational: true },
+    context,
+  );
+}
+
+function dashboardAlert(title: string, body: string) {
+  return plainAlert(title, body, process.env["EVENTPULSE_PUBLIC_URL"] ?? "", "Open dashboard");
+}
+
+// System notices (profile paused, checks failing/recovered, event removed, token expiry, monitor
+// failure) go to the dashboard alert log only, so Discord/Telegram/push/SMS carry nothing but
+// real ticket alerts. Set EVENTPULSE_SYSTEM_NOTICES_TO_CHANNELS=true to also send them to chat.
+function systemNoticesToChannels() {
+  return process.env["EVENTPULSE_SYSTEM_NOTICES_TO_CHANNELS"] === "true";
+}
+
+async function createAndDeliverAlert(
+  input: {
+    targetId: string | null;
+    tone: BackendAlertLog["tone"];
+    content: AlertContent;
+    operational?: boolean;
+  },
+  context: AlertContext,
+) {
+  const deliver =
+    hasEnabledDeliveryChannel(context.settings) &&
+    (!input.operational || systemNoticesToChannels());
+  // Ticket alerts are only recorded when they are delivered; system notices are always logged.
+  if (!deliver && !input.operational) return;
   const [alert] = await rest<AlertRow[]>("eventpulse_alerts", {
     method: "POST",
     prefer: "return=representation",
-    body: { target_id: null, tone: "info", message: body, deep_link: null },
+    body: {
+      target_id: input.targetId,
+      tone: input.tone,
+      message: `${input.content.title}\n${input.content.text}`.slice(0, 4000),
+      deep_link: input.content.url || null,
+    },
   });
-  return await deliverAlert({
-    ...(alert?.id ? { alertId: alert.id } : {}),
-    title: "🔄 HD-1: monitor starting up",
-    body,
-    url: process.env["EVENTPULSE_PUBLIC_URL"] ?? "",
-    settings,
-    subscriptions,
-  });
+  context.result.alertsCreated += 1;
+  if (!deliver) return;
+
+  // Deliver in the background so a slow or rate-limited channel never delays the next check;
+  // the pass waits for all deliveries before returning.
+  context.deliveries.push(
+    deliverAlert({
+      ...(alert?.id ? { alertId: alert.id } : {}),
+      content: input.content,
+      settings: context.settings,
+      subscriptions: context.subscriptions,
+    }),
+  );
 }
 
 const MONITOR_FAILURE_REPEAT_MS = 15 * 60 * 1000;
@@ -756,6 +1040,14 @@ export async function notifyMonitorRecovered() {
 // Settings come from Supabase when it answers; if Supabase itself is the failure, fall back to the
 // chat channels configured in the environment.
 async function deliverOperationalAlert(title: string, body: string) {
+  if (!systemNoticesToChannels()) {
+    // Dashboard only; if Supabase itself is down this lands in the server log instead.
+    await rest("eventpulse_alerts", {
+      method: "POST",
+      body: { target_id: null, tone: "warn", message: `${title}\n${body}`, deep_link: null },
+    }).catch(() => console.error(`HD-1 ${title}: ${body}`));
+    return;
+  }
   let settings: BackendSettings;
   let subscriptions: PushSubscriptionRow[] = [];
   try {
@@ -778,32 +1070,11 @@ async function deliverOperationalAlert(title: string, body: string) {
   if (!hasEnabledDeliveryChannel(settings)) return;
 
   const delivery = await deliverAlert({
-    title,
-    body,
-    url: process.env["EVENTPULSE_PUBLIC_URL"] ?? "",
+    content: dashboardAlert(title, body),
     settings,
     subscriptions,
   });
   if (delivery.errors.length) console.error("HD-1 operational alert issues", delivery.errors);
-}
-
-// Same title on every channel, so a ticket drop stands out from routine snapshot alerts.
-function ticketAlertTitle(check: MonitorCheckResult, paused: boolean, recovered: boolean) {
-  if (check.status === "available") return "🟢 HD-1: TICKETS AVAILABLE";
-  if (check.statusCode === 403) {
-    return `⛔ HD-1: blocked by Ticketmaster (identity check)${paused ? ", profile paused" : ""}`;
-  }
-  if (check.statusCode === 429) {
-    return `⏳ HD-1: rate limited by Ticketmaster${paused ? ", profile paused" : ""}`;
-  }
-  if (recovered) return "✅ HD-1: profile unblocked, checks resumed";
-  if (check.status === "captcha") return "⚠️ HD-1: captcha challenge";
-  if (check.status === "limited") return "⚠️ HD-1: check failed";
-  return "HD-1 Drop Monitor ticket alert";
-}
-
-function formatUtcTime(iso: string) {
-  return iso.slice(11, 16);
 }
 
 function addDeliveryResult(result: MonitorRunResult, delivery: DeliveryResult) {
@@ -1056,12 +1327,14 @@ async function notifyMultiloginTokenExpiry(
     },
   });
   result.alertsCreated += 1;
+  if (!systemNoticesToChannels()) {
+    lastTokenWarning = { key: warningKey, sentAt: Date.now() };
+    return;
+  }
 
   const delivery = await deliverAlert({
     ...(alert?.id ? { alertId: alert.id } : {}),
-    title: "HD-1 Drop Monitor configuration alert",
-    body: alertMessage,
-    url: process.env["EVENTPULSE_PUBLIC_URL"] ?? "/",
+    content: dashboardAlert("⚠️ HD-1: MultiLogin token", alertMessage),
     settings,
     subscriptions,
   });
@@ -1094,6 +1367,7 @@ async function checkTarget(
       throw new Error(`Approved Multilogin profile mapping is incomplete: ${target.profile}`);
     }
 
+    if (!usesRotatingProxy) profileLastLoadAt.set(target.profile, Date.now());
     const response = await readRenderedTicketPage({
       endpoint: process.env["MULTILOGIN_LAUNCHER_ENDPOINT"] ?? settings.multiloginEndpoint,
       folderId: profile.multilogin_folder_id,
@@ -1101,44 +1375,66 @@ async function checkTarget(
       profileName: profile.profile_name,
       url: target.url,
     });
-    const responseMs = Date.now() - started;
-    const snapshot = extractTicketPageSnapshot({
-      html: response.html,
-      statusCode: response.statusCode,
-      responseOk: response.responseOk,
-      sectionFilters: target.filters.sectionFilters,
-      maxPrice: target.filters.maxPrice,
-      normalTicketsOnly: target.filters.normalTicketsOnly,
-    });
-
-    return {
-      status: snapshot.status,
-      availability: snapshot.summary,
-      responseMs,
-      statusCode: response.statusCode,
-      error: null,
+    return interpretTicketPage(target, response, {
+      responseMs: Date.now() - started,
       usesRotatingProxy,
-    };
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown monitor error";
     return {
+      kind: "failed",
       status: "limited",
-      availability: `Target check failed: ${message}`.slice(0, 1200),
+      availability: "",
       responseMs: Date.now() - started,
       statusCode: null,
-      error: message,
+      error: message.slice(0, 1200),
       usesRotatingProxy,
+      report: null,
     };
   }
 }
 
 type DeliveryResult = Omit<MonitorRunResult, "checked" | "alertsCreated">;
 
+// One alert, rendered for every channel. Ticket alerts carry rich Telegram HTML and a Discord
+// embed; operational notes use plainAlert.
+type AlertContent = {
+  title: string;
+  text: string;
+  url: string;
+  buttonLabel: string;
+  telegramHtml: string;
+  discordEmbed: Record<string, unknown> | null;
+  imageUrl: string | null;
+};
+
+function plainAlert(title: string, body: string, url: string, buttonLabel: string): AlertContent {
+  return {
+    title,
+    text: body,
+    url,
+    buttonLabel,
+    telegramHtml: `<b>${escapeHtml(title)}</b>\n${escapeHtml(body)}`,
+    discordEmbed: null,
+    imageUrl: null,
+  };
+}
+
+function ticketAlertContent(alert: TicketAlertContent): AlertContent {
+  return {
+    title: alert.title,
+    text: alert.text,
+    url: alert.url,
+    buttonLabel: "Buy Tickets",
+    telegramHtml: alert.telegramHtml,
+    discordEmbed: alert.discordEmbed,
+    imageUrl: alert.imageUrl,
+  };
+}
+
 async function deliverAlert(input: {
   alertId?: string;
-  title: string;
-  body: string;
-  url: string;
+  content: AlertContent;
   settings: BackendSettings;
   subscriptions: PushSubscriptionRow[];
 }): Promise<DeliveryResult> {
@@ -1150,35 +1446,40 @@ async function deliverAlert(input: {
     discordSent: 0,
     errors: [] as string[],
   };
+  const { content } = input;
 
-  // Push shows the title separately; text channels get it as the first line of the message.
-  const text = `${input.title}\n${input.body}`;
+  // Push shows the title separately; SMS/WhatsApp get it as the first line of the message.
+  const text = `${content.title}\n${content.text}`;
   [result.pushSent, result.smsSent, result.whatsappSent, result.telegramSent, result.discordSent] =
     await Promise.all([
-      input.settings.pushAlerts && input.subscriptions.length > 0
+      input.settings.pushAlerts && channelAllowed("push") && input.subscriptions.length > 0
         ? deliverChannel("Web push", result.errors, () =>
-            sendWebPush(input.title, input.body, input.url, input.subscriptions, result.errors),
+            sendWebPush(
+              content.title,
+              content.text.slice(0, 600),
+              content.url,
+              input.subscriptions,
+              result.errors,
+            ),
           )
         : 0,
-      input.settings.smsAlerts
+      input.settings.smsAlerts && channelAllowed("sms")
         ? deliverChannel("Twilio SMS", result.errors, () =>
             sendTwilioMessage("sms", text, result.errors),
           )
         : 0,
-      input.settings.whatsappAlerts
+      input.settings.whatsappAlerts && channelAllowed("whatsapp")
         ? deliverChannel("Twilio WhatsApp", result.errors, () =>
             sendTwilioMessage("whatsapp", text, result.errors),
           )
         : 0,
-      input.settings.telegramAlerts
+      input.settings.telegramAlerts && channelAllowed("telegram")
         ? deliverChannel("Telegram", result.errors, () =>
-            sendTelegramMessage(text, input.url, result.errors),
+            sendTelegramMessage(content, result.errors),
           )
         : 0,
-      input.settings.discordAlerts
-        ? deliverChannel("Discord", result.errors, () =>
-            sendDiscordMessage(text, input.url, result.errors),
-          )
+      input.settings.discordAlerts && channelAllowed("discord")
+        ? deliverChannel("Discord", result.errors, () => sendDiscordMessage(content, result.errors))
         : 0,
     ]);
 
@@ -1277,10 +1578,13 @@ function parseRecipients(value: string | undefined) {
     .filter(Boolean);
 }
 
-const telegramQueues = new Map<string, ChannelQueue>();
-const discordQueues = new Map<string, ChannelQueue>();
+type TelegramRich = { html: string; buttonLabel: string; url: string; photoUrl: string | null };
+type DiscordRich = { embed: Record<string, unknown>; buttonLabel: string; url: string };
 
-async function sendTelegramMessage(body: string, url: string, errors: string[]) {
+const telegramQueues = new Map<string, ChannelQueue<TelegramRich>>();
+const discordQueues = new Map<string, ChannelQueue<DiscordRich>>();
+
+async function sendTelegramMessage(content: AlertContent, errors: string[]) {
   const token = process.env["TELEGRAM_BOT_TOKEN"];
   const chatIds = parseRecipients(process.env["TELEGRAM_CHAT_IDS"]);
   if (!token || chatIds.length === 0) {
@@ -1288,9 +1592,17 @@ async function sendTelegramMessage(body: string, url: string, errors: string[]) 
     return 0;
   }
 
-  const text = url ? `${body}\n${url}` : body;
+  const message = {
+    text: `${content.title}\n${content.text}`,
+    rich: {
+      html: content.telegramHtml,
+      buttonLabel: content.buttonLabel,
+      url: content.url,
+      photoUrl: content.imageUrl,
+    },
+  };
   const results = await Promise.all(
-    chatIds.map((chatId) => telegramQueue(token, chatId).enqueue(text, errors)),
+    chatIds.map((chatId) => telegramQueue(token, chatId).enqueue(message, errors)),
   );
   return results.filter(Boolean).length;
 }
@@ -1299,19 +1611,53 @@ function telegramQueue(token: string, chatId: string) {
   const key = `${token}:${chatId}`;
   let queue = telegramQueues.get(key);
   if (!queue) {
-    queue = new ChannelQueue({
+    queue = new ChannelQueue<TelegramRich>({
       label: `Telegram ${chatId}`,
       // Telegram allows ~1 message/second per chat and 20 messages/minute per group or channel.
       minIntervalMs: chatId.startsWith("-") ? 3_100 : 1_100,
       maxLength: 4_096,
-      send: async (text) => {
-        const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
-          signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+      send: async (message) => {
+        // TELEGRAM_API_BASE_URL exists for local end-to-end tests against a fake Bot API.
+        const api = `${process.env["TELEGRAM_API_BASE_URL"] || "https://api.telegram.org"}/bot${token}`;
+        const rich = message.rich;
+        if (!rich) {
+          return await postJson(`${api}/sendMessage`, {
+            chat_id: chatId,
+            text: message.text,
+            link_preview_options: { is_disabled: true },
+          });
+        }
+
+        const replyMarkup = isHttpUrl(rich.url)
+          ? { inline_keyboard: [[{ text: rich.buttonLabel, url: rich.url }]] }
+          : undefined;
+        // Photo captions are limited to 1024 characters; longer alerts go as a text message.
+        if (rich.photoUrl && rich.html.length <= 1_024) {
+          const photo = await postJson(`${api}/sendPhoto`, {
+            chat_id: chatId,
+            photo: rich.photoUrl,
+            caption: rich.html,
+            parse_mode: "HTML",
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+          });
+          // A photo Telegram cannot fetch must not cost the alert: fall back to text.
+          if (photo.ok || photo.status !== 400) return photo;
+        }
+        const sent = await postJson(`${api}/sendMessage`, {
+          chat_id: chatId,
+          text: rich.html.slice(0, 4_096),
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         });
-        return await toChannelResult(response);
+        if (sent.ok || sent.status !== 400) return sent;
+        // Last resort if the HTML is rejected: plain text with the link.
+        return await postJson(`${api}/sendMessage`, {
+          chat_id: chatId,
+          text: `${message.text}`.slice(0, 4_096),
+          link_preview_options: { is_disabled: true },
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+        });
       },
     });
     telegramQueues.set(key, queue);
@@ -1319,16 +1665,24 @@ function telegramQueue(token: string, chatId: string) {
   return queue;
 }
 
-async function sendDiscordMessage(body: string, url: string, errors: string[]) {
+async function sendDiscordMessage(content: AlertContent, errors: string[]) {
   const webhookUrls = parseRecipients(process.env["DISCORD_WEBHOOK_URLS"]);
   if (webhookUrls.length === 0) {
     errors.push("Discord env missing; message not sent.");
     return 0;
   }
 
-  const text = url ? `${body}\n${url}` : body;
+  const plain = [content.title, content.text, isHttpUrl(content.url) ? content.url : ""]
+    .filter(Boolean)
+    .join("\n");
+  const message = content.discordEmbed
+    ? {
+        text: plain,
+        rich: { embed: content.discordEmbed, buttonLabel: content.buttonLabel, url: content.url },
+      }
+    : { text: plain };
   const results = await Promise.all(
-    webhookUrls.map((webhookUrl) => discordQueue(webhookUrl).enqueue(text, errors)),
+    webhookUrls.map((webhookUrl) => discordQueue(webhookUrl).enqueue(message, errors)),
   );
   return results.filter(Boolean).length;
 }
@@ -1336,24 +1690,76 @@ async function sendDiscordMessage(body: string, url: string, errors: string[]) {
 function discordQueue(webhookUrl: string) {
   let queue = discordQueues.get(webhookUrl);
   if (!queue) {
-    queue = new ChannelQueue({
+    queue = new ChannelQueue<DiscordRich>({
       label: `Discord webhook #${discordQueues.size + 1}`,
       // Discord webhooks allow 5 requests / 2 seconds and roughly 30 messages/minute per channel.
       minIntervalMs: 2_100,
       maxLength: 2_000,
-      send: async (text) => {
-        const response = await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ content: text, allowed_mentions: { parse: [] } }),
-          signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
-        });
-        return await toChannelResult(response);
+      send: async (message) => {
+        const rich = message.rich;
+        if (!rich) {
+          return await postJson(webhookUrl, {
+            content: message.text,
+            allowed_mentions: { parse: [] },
+          });
+        }
+        const body = { embeds: [rich.embed], allowed_mentions: { parse: [] } };
+        if (isHttpUrl(rich.url)) {
+          // A real "Buy Tickets" link button under the embed (webhooks accept link buttons with
+          // with_components=true). If Discord rejects it, the embed's own link still works.
+          const withButton = await postJson(withQuery(webhookUrl, "with_components", "true"), {
+            ...body,
+            components: [
+              {
+                type: 1,
+                components: [{ type: 2, style: 5, label: rich.buttonLabel, url: rich.url }],
+              },
+            ],
+          });
+          if (withButton.ok || withButton.status !== 400) return withButton;
+        }
+        return await postJson(webhookUrl, body);
       },
     });
     discordQueues.set(webhookUrl, queue);
   }
   return queue;
+}
+
+async function postJson(url: string, body: unknown) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+  });
+  return await toChannelResult(response);
+}
+
+// EVENTPULSE_ONLY_CHANNELS=discord (comma list) limits delivery to those channels, e.g. when
+// running the portal locally against production data without reaching the client's Telegram.
+function channelAllowed(channel: "push" | "sms" | "whatsapp" | "telegram" | "discord") {
+  const only = process.env["EVENTPULSE_ONLY_CHANNELS"]?.trim();
+  if (!only) return true;
+  return only
+    .toLowerCase()
+    .split(",")
+    .map((item) => item.trim())
+    .includes(channel);
+}
+
+function withQuery(url: string, key: string, value: string) {
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set(key, value);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function isHttpUrl(value: string) {
+  return /^https?:\/\/[^\s]+$/i.test(value);
 }
 
 async function toChannelResult(response: Response): Promise<ChannelSendResult> {

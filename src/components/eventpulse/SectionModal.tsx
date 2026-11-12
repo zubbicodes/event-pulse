@@ -1,4 +1,10 @@
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { AlertLog } from "@/components/eventpulse/AlertLog";
 import { MonitorGrid } from "@/components/eventpulse/MonitorGrid";
 import { ProfilePanel } from "@/components/eventpulse/ProfilePanel";
@@ -39,6 +45,7 @@ export function SectionModal({
   settings,
   targetFormSignal,
   targets,
+  profileMinIntervalSeconds,
 }: {
   active: NavId;
   alerts: BackendAlertLog[];
@@ -48,6 +55,7 @@ export function SectionModal({
   settings: BackendSettings;
   targetFormSignal: number;
   targets: BackendMonitorTarget[];
+  profileMinIntervalSeconds: number;
 }) {
   const activeItem = NAV_ITEMS.find((item) => item.id === active);
   const copy = MODAL_COPY[active];
@@ -71,6 +79,7 @@ export function SectionModal({
               targets={targets}
               profiles={profiles}
               openFormSignal={targetFormSignal}
+              profileMinIntervalSeconds={profileMinIntervalSeconds}
             />
           )}
           {active === "profiles" && <ProfilePanel profiles={profiles} settings={settings} />}

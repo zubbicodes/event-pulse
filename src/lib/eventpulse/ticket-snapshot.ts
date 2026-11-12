@@ -1,7 +1,141 @@
+import {
+  buildInventoryReport,
+  parseEventDetails,
+  parseInventoryPayloads,
+  summarizeReport,
+  type InventoryReport,
+  type TargetFilters,
+} from "./ticket-inventory.ts";
+
 export type TicketPageSnapshot = {
   status: "available" | "monitoring" | "captcha" | "limited";
+  // Short state, e.g. "Tickets available", "Sold out or unavailable".
+  state: string;
   summary: string;
 };
+
+export type MonitorCheckResult = {
+  // ok: page read; blocked: 403/429 from the site; captcha; gone: the event page was removed
+  // (404/410, e.g. the event is over); failed: anything else went wrong.
+  kind: "ok" | "blocked" | "captcha" | "gone" | "failed";
+  status: "available" | "monitoring" | "captcha" | "limited" | "paused";
+  // Dashboard text; only written for "ok" checks so failures never overwrite real stock data.
+  availability: string;
+  responseMs: number;
+  statusCode: number | null;
+  error: string | null;
+  usesRotatingProxy: boolean;
+  report: InventoryReport | null;
+};
+
+export type RenderedTicketPage = {
+  html: string;
+  statusCode: number;
+  responseOk: boolean;
+  inventoryPayloads: unknown[];
+};
+
+// Turns one rendered page (HTML + captured inventory JSON) into a check result.
+export function interpretTicketPage(
+  target: { url: string; event: string; venue: string; filters: TargetFilters },
+  page: RenderedTicketPage,
+  meta: { responseMs: number; usesRotatingProxy: boolean },
+): MonitorCheckResult {
+  const base = { ...meta, statusCode: page.statusCode };
+  if (page.statusCode === 403 || page.statusCode === 429) {
+    return {
+      ...base,
+      kind: "blocked",
+      status: "limited",
+      availability: "",
+      error:
+        page.statusCode === 429
+          ? "Rate limited by the ticket site (HTTP 429)."
+          : "Identity check from the ticket site (HTTP 403).",
+      report: null,
+    };
+  }
+
+  if (page.statusCode === 404 || page.statusCode === 410) {
+    return {
+      ...base,
+      kind: "gone",
+      status: "paused",
+      availability: `Event page removed by the site (HTTP ${page.statusCode}); monitoring stopped`,
+      error: `Event page no longer exists (HTTP ${page.statusCode}).`,
+      report: null,
+    };
+  }
+
+  const snapshot = extractTicketPageSnapshot({
+    html: page.html,
+    statusCode: page.statusCode,
+    responseOk: page.responseOk,
+    sectionFilters: target.filters.sectionFilters,
+    maxPrice: target.filters.maxPrice,
+    normalTicketsOnly: target.filters.normalTicketsOnly,
+  });
+  if (snapshot.status === "captcha") {
+    return {
+      ...base,
+      kind: "captcha",
+      status: "captcha",
+      availability: "",
+      error: "Captcha challenge.",
+      report: null,
+    };
+  }
+  if (!page.responseOk) {
+    return {
+      ...base,
+      kind: "failed",
+      status: "limited",
+      availability: "",
+      error: `Ticket page answered HTTP ${page.statusCode}.`,
+      report: null,
+    };
+  }
+
+  const report = buildInventoryReport({
+    event: parseEventDetails(page.html, target.url, { name: target.event, venue: target.venue }),
+    listings: parseInventoryPayloads(page.inventoryPayloads),
+    filters: target.filters,
+  });
+  if (report.inventoryKnown) {
+    return {
+      ...base,
+      kind: "ok",
+      status: report.totalStock > 0 ? "available" : "monitoring",
+      availability: summarizeReport(report),
+      error: null,
+      report,
+    };
+  }
+
+  // No inventory feed captured (site without one): fall back to page-text signals. Ticketmaster
+  // pages always say "buy tickets", so page text never counts as stock there.
+  const onSale = snapshot.status === "available" && !isTicketmasterHost(target.url);
+  return {
+    ...base,
+    kind: "ok",
+    status: onSale ? "available" : "monitoring",
+    availability: onSale
+      ? "Tickets appear to be on sale (page text)"
+      : isTicketmasterHost(target.url)
+        ? "Page loaded; no ticket inventory published"
+        : snapshot.state,
+    error: null,
+    report,
+  };
+}
+
+function isTicketmasterHost(url: string) {
+  try {
+    return /(^|\.)ticketmaster\.[a-z.]+$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
 
 type SnapshotInput = {
   html: string;
@@ -49,7 +183,11 @@ const NEGATIVE_SIGNALS = [
 ];
 
 export function extractTicketPageSnapshot(input: SnapshotInput): TicketPageSnapshot {
-  const text = decodeHtml(input.html)
+  // Visible text only: script/style bodies (e.g. Google reCAPTCHA loaders on every Ticketmaster
+  // page) must not count as page wording.
+  const text = decodeHtml(
+    input.html.replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " "),
+  )
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -62,7 +200,10 @@ export function extractTicketPageSnapshot(input: SnapshotInput): TicketPageSnaps
   const sections = extractSections(lower, matchedSections);
   const signals = SIGNALS.filter(([needle]) => lower.includes(needle)).map(([, label]) => label);
   const quantities = extractQuantities(lower);
-  const captcha = lower.includes("captcha") || lower.includes("verify you are human");
+  const captcha =
+    /verify (?:that )?you(?:'| a)re (?:a )?human|complete the captcha|captcha challenge|are you a robot|press (?:&|and) hold/i.test(
+      lower,
+    );
   const blocked = input.statusCode === 403 || input.statusCode === 429;
   const positive = POSITIVE_SIGNALS.some((needle) => lower.includes(needle));
   const negative = NEGATIVE_SIGNALS.some((needle) => lower.includes(needle));
@@ -102,59 +243,7 @@ export function extractTicketPageSnapshot(input: SnapshotInput): TicketPageSnaps
   ];
   if (pageTitle) facts.push(`page: ${pageTitle}`);
 
-  return { status, summary: facts.join("; ").slice(0, 1200) };
-}
-
-export function buildTicketAlertMessage(
-  eventName: string,
-  previousSummary: string,
-  currentSummary: string,
-  firstObservation: boolean,
-) {
-  if (firstObservation) {
-    return `${eventName}\nInitial ticket snapshot\nCurrent: ${currentSummary}`.slice(0, 1800);
-  }
-
-  const changes: string[] = [];
-  const previousState = previousSummary.split(";")[0]?.trim();
-  const currentState = currentSummary.split(";")[0]?.trim();
-  if (previousState && currentState && previousState !== currentState) {
-    changes.push(`State changed: ${previousState} -> ${currentState}`);
-  }
-
-  const previousPrice = extractFirstSummaryPrice(previousSummary);
-  const currentPrice = extractFirstSummaryPrice(currentSummary);
-  if (
-    previousPrice &&
-    currentPrice &&
-    previousPrice.currency === currentPrice.currency &&
-    previousPrice.value !== currentPrice.value
-  ) {
-    const direction = currentPrice.value < previousPrice.value ? "dropped" : "increased";
-    changes.push(
-      `Lowest price ${direction}: ${formatPrice(previousPrice)} -> ${formatPrice(currentPrice)}`,
-    );
-  }
-
-  if (changes.length === 0) changes.push("Ticket details changed");
-  return [eventName, ...changes, `Previous: ${previousSummary}`, `Current: ${currentSummary}`]
-    .join("\n")
-    .slice(0, 1800);
-}
-
-export function buildScheduledTicketSnapshotMessage(
-  eventName: string,
-  currentSummary: string,
-  checkedAt: string,
-) {
-  return [
-    eventName,
-    "Scheduled monitor check complete",
-    `Checked: ${checkedAt}`,
-    `Current: ${currentSummary}`,
-  ]
-    .join("\n")
-    .slice(0, 1800);
+  return { status, state, summary: facts.join("; ").slice(0, 1200) };
 }
 
 function extractPageTitle(html: string) {
@@ -197,12 +286,6 @@ function symbolCurrency(symbol: string) {
 
 function formatPrice(price: { currency: string; value: number }) {
   return `${price.currency} ${price.value.toFixed(2)}`;
-}
-
-function extractFirstSummaryPrice(summary: string) {
-  const match = summary.match(/prices:\s*(GBP|EUR|USD)\s+([0-9]+(?:\.[0-9]{2})?)/i);
-  if (!match) return null;
-  return { currency: match[1]!.toUpperCase(), value: Number(match[2]) };
 }
 
 function extractQuantities(lower: string) {

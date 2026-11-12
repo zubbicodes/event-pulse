@@ -1,0 +1,60 @@
+[
+ {
+  "schema": "urn:com.ticketmaster.services:schema:ismds:EventFacets:1.0",
+  "meta": {
+   "type": "urn:com.ticketmaster.services:type:ismds:EventFacets",
+   "modified": "2026-11-12T12:51:15.170013861Z",
+   "expires": "2026-11-12T12:52:15.170013861Z"
+  },
+  "eventId": "3E006514E54A31B8",
+  "facets": [],
+  "_links": {
+   "self": [
+    {
+     "href": "http://ismds-envoy.prd229.prod12.eu-west-1.pub-tktm.io:443/host/3E006514E54A31B8/facets/?by=shape+tickettypes+attributes+available+accessibility+offer+placeGroups+inventoryType+offerType+description&show=places&q=available&oq=&compress=places"
+    }
+   ],
+   "event": [
+    {
+     "href": "http://ismds-envoy.prd229.prod12.eu-west-1.pub-tktm.io:443/event/3E006514E54A31B8"
+    }
+   ],
+   "accessibility": [
+    {
+     "href": "http://ismds-envoy.prd229.prod12.eu-west-1.pub-tktm.io:443/host/3E006514E54A31B8/accessibilities/{adaTypeCode}",
+     "templated": true
+    }
+   ],
+   "tickettype": [
+    {
+     "href": "http://ismds-envoy.prd229.prod12.eu-west-1.pub-tktm.io:443/host/3E006514E54A31B8/tickettypes/{ticketTypeId}",
+     "templated": true
+    }
+   ],
+   "offer": [
+    {
+     "href": "http://ismds-envoy.prd229.prod12.eu-west-1.pub-tktm.io:443/host/3E006514E54A31B8/offers/{offerId}",
+     "templated": true
+    }
+   ],
+   "description": [
+    {
+     "href": "http://ismds-envoy.prd229.prod12.eu-west-1.pub-tktm.io:443/host/3E006514E54A31B8/descriptions/{descriptionId}",
+     "templated": true
+    }
+   ],
+   "place": [
+    {
+     "href": "http://ismds-envoy.prd229.prod12.eu-west-1.pub-tktm.io:443/host/3E006514E54A31B8/places/{placeId}",
+     "templated": true
+    }
+   ]
+  }
+ },
+ {
+  "quantity": 0,
+  "total": 0,
+  "picks": [],
+  "descriptions": []
+ }
+]

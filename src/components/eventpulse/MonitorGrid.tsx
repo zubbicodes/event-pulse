@@ -1,16 +1,31 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Pause, Play, ScrollText, Link2, RefreshCw, UserRound, Trash2 } from "lucide-react";
+import {
+  BellRing,
+  Pause,
+  Play,
+  ScanSearch,
+  ScrollText,
+  Link2,
+  RefreshCw,
+  UserRound,
+  Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { PLATFORM_FILTERS, STATUS_META } from "@/lib/eventpulse-data";
 import type { Platform } from "@/lib/eventpulse-data";
-import type { BackendMonitorTarget, BackendProfileRow } from "@/lib/eventpulse/types";
+import type {
+  BackendMonitorTarget,
+  BackendProfileRow,
+  CheckNowResult,
+} from "@/lib/eventpulse/types";
 import {
   addTargetFn,
+  checkTargetNowFn,
   deleteTargetFn,
   updateTargetProfileFn,
   updateTargetStatusFn,
@@ -22,10 +37,12 @@ export function MonitorGrid({
   targets,
   profiles,
   openFormSignal = 0,
+  profileMinIntervalSeconds = 0,
 }: {
   targets: BackendMonitorTarget[];
   profiles: BackendProfileRow[];
   openFormSignal?: number;
+  profileMinIntervalSeconds?: number;
 }) {
   const [filter, setFilter] = useState<string>("All Sites");
   const [showForm, setShowForm] = useState(false);
@@ -49,6 +66,9 @@ export function MonitorGrid({
   const [statusMessage, setStatusMessage] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
+  const [checking, setChecking] = useState<{ id: string; send: boolean } | null>(null);
+  const [checkResults, setCheckResults] = useState<Record<string, CheckNowResult>>({});
+  const checkTargetNow = useServerFn(checkTargetNowFn);
   const addTarget = useServerFn(addTargetFn);
   const updateTargetProfile = useServerFn(updateTargetProfileFn);
   const deleteTarget = useServerFn(deleteTargetFn);
@@ -103,6 +123,34 @@ export function MonitorGrid({
       setStatusMessage(error instanceof Error ? error.message : "Profile change failed.");
     } finally {
       setReassigningId(null);
+    }
+  }
+
+  // Real check through the target's Multilogin profile; optionally sends the real alert.
+  async function runCheck(target: BackendMonitorTarget, sendAlert: boolean) {
+    setChecking({ id: target.id, send: sendAlert });
+    try {
+      const result = await checkTargetNow({ data: { id: target.id, sendAlert } });
+      setCheckResults((current) => ({ ...current, [target.id]: result }));
+      if (result.checked) await router.invalidate();
+    } catch (error) {
+      setCheckResults((current) => ({
+        ...current,
+        [target.id]: {
+          checked: false,
+          kind: null,
+          status: null,
+          summary: "",
+          statusCode: null,
+          alertPreview: null,
+          alertSent: false,
+          delivered: { push: 0, telegram: 0, discord: 0, sms: 0, whatsapp: 0 },
+          message: error instanceof Error ? error.message : "Check failed.",
+          errors: [],
+        },
+      }));
+    } finally {
+      setChecking(null);
     }
   }
 
@@ -342,6 +390,11 @@ export function MonitorGrid({
                 <div className="flex items-center gap-1.5">
                   <RefreshCw className="h-3.5 w-3.5 shrink-0 text-info" />
                   Refreshing every {t.refresh.toFixed(1)}s
+                  {profileMinIntervalSeconds > t.refresh && (
+                    <span className="text-muted-foreground">
+                      (at most once per {profileMinIntervalSeconds}s per profile)
+                    </span>
+                  )}
                 </div>
                 <div className="flex min-w-0 items-center gap-1.5">
                   <UserRound className="h-3.5 w-3.5 shrink-0 text-online" />
@@ -377,6 +430,24 @@ export function MonitorGrid({
                 <Button
                   size="sm"
                   variant="secondary"
+                  disabled={checking != null}
+                  onClick={() => void runCheck(t, false)}
+                >
+                  <ScanSearch className="h-3.5 w-3.5" />
+                  {checking?.id === t.id && !checking.send ? "Checking…" : "Check now"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={checking != null}
+                  onClick={() => void runCheck(t, true)}
+                >
+                  <BellRing className="h-3.5 w-3.5" />
+                  {checking?.id === t.id && checking.send ? "Checking…" : "Check & send alert"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
                   onClick={() => void setStatus(t.id, "paused")}
                 >
                   <Pause className="h-3.5 w-3.5" />
@@ -400,11 +471,40 @@ export function MonitorGrid({
                   Delete
                 </Button>
               </div>
+              {checkResults[t.id] && <CheckResultPanel result={checkResults[t.id]!} />}
             </article>
           );
         })}
       </div>
     </section>
+  );
+}
+
+function CheckResultPanel({ result }: { result: CheckNowResult }) {
+  const delivered = Object.entries(result.delivered)
+    .filter(([, count]) => count > 0)
+    .map(([channel, count]) => `${channel} ${count}`);
+  const tone = !result.checked
+    ? "border-warn/40 text-warn"
+    : result.kind === "ok"
+      ? "border-online/40 text-online"
+      : "border-alert/40 text-alert";
+  return (
+    <div className={cn("mt-3 space-y-2 rounded-md border bg-secondary/40 p-3 text-xs", tone)}>
+      <p className="font-medium">{result.message}</p>
+      {result.summary && <p className="font-mono text-foreground">{result.summary}</p>}
+      {delivered.length > 0 && (
+        <p className="text-muted-foreground">Delivered: {delivered.join(", ")}</p>
+      )}
+      {result.errors.length > 0 && (
+        <p className="text-alert">{result.errors.slice(0, 3).join(" · ")}</p>
+      )}
+      {result.alertPreview && (
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-background/70 p-2 font-mono text-[11px] text-foreground">
+          {result.alertPreview}
+        </pre>
+      )}
+    </div>
   );
 }
 

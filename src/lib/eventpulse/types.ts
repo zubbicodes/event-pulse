@@ -82,6 +82,8 @@ export interface DashboardData {
   alerts: BackendAlertLog[];
   settings: BackendSettings;
   stats: DashboardStats;
+  // Minimum seconds between page loads through one profile (0 with a rotating proxy pool).
+  profileMinIntervalSeconds: number;
   backendConnected: boolean;
   backendMessage: string;
 }
@@ -145,3 +147,17 @@ export interface MonitorRunResult {
   discordSent: number;
   errors: string[];
 }
+
+// Result of the portal "Check now" / "Check & send alert" buttons.
+export type CheckNowResult = {
+  checked: boolean;
+  kind: "ok" | "blocked" | "captcha" | "gone" | "failed" | null;
+  status: MonitorStatus | null;
+  summary: string;
+  statusCode: number | null;
+  alertPreview: string | null;
+  alertSent: boolean;
+  delivered: { push: number; telegram: number; discord: number; sms: number; whatsapp: number };
+  message: string;
+  errors: string[];
+};

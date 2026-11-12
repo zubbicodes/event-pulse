@@ -1,11 +1,11 @@
 // Rate-aware delivery queues for chat channels (Telegram, Discord).
 //
-// Every due ticket check produces an alert, so with several targets on a short refresh interval
-// the alert rate exceeds Telegram's group limit (20 messages/minute) and Discord's webhook limit
-// (~30 messages/minute). Each destination therefore gets one queue that paces requests below the
-// provider limit, honours 429 retry_after, and packs everything that queued up while it waited
-// into as few messages as the provider's length limit allows. Alerts are never dropped for being
-// over the rate limit; they arrive in the next allowed message instead.
+// A ticket drop on several targets at once can exceed Telegram's group limit (20 messages/minute)
+// or Discord's webhook limit (~30 messages/minute). Each destination therefore gets one queue that
+// paces requests below the provider limit and honours 429 retry_after. Rich ticket alerts (HTML,
+// embeds, buttons) are always sent as their own message; plain operational notes that queued up
+// while waiting are packed into as few messages as the length limit allows. Alerts are never
+// dropped for being over the rate limit; they arrive in the next allowed message instead.
 
 const MAX_RATE_LIMIT_RETRIES = 5;
 const MAX_OUTAGE_RETRIES = 1;
@@ -19,34 +19,39 @@ export type ChannelSendResult = {
   detail: string;
 };
 
-type ChannelQueueOptions = {
+// `rich` carries a provider-specific payload (Telegram HTML + button, Discord embed). The queue
+// never merges rich messages; `text` is the plain fallback used for batching.
+export type QueueMessage<Rich> = { text: string; rich?: Rich };
+
+type ChannelQueueOptions<Rich> = {
   label: string;
   minIntervalMs: number;
   maxLength: number;
   header?: string;
-  send: (text: string) => Promise<ChannelSendResult>;
+  send: (message: QueueMessage<Rich>) => Promise<ChannelSendResult>;
 };
 
-type QueueItem = {
-  text: string;
+type QueueItem<Rich> = {
+  message: QueueMessage<Rich>;
   resolve: (sent: boolean) => void;
   errors: string[];
 };
 
-export class ChannelQueue {
-  private readonly items: QueueItem[] = [];
+export class ChannelQueue<Rich = never> {
+  private readonly items: QueueItem<Rich>[] = [];
   private nextAllowedAt = 0;
   private pumping = false;
-  private readonly options: ChannelQueueOptions;
+  private readonly options: ChannelQueueOptions<Rich>;
 
-  constructor(options: ChannelQueueOptions) {
+  constructor(options: ChannelQueueOptions<Rich>) {
     this.options = options;
   }
 
-  // Resolves true once the text is delivered inside some message, false if delivery failed.
-  enqueue(text: string, errors: string[]) {
+  // Resolves true once the message is delivered, false if delivery failed.
+  enqueue(message: string | QueueMessage<Rich>, errors: string[]) {
+    const item: QueueMessage<Rich> = typeof message === "string" ? { text: message } : message;
     return new Promise<boolean>((resolve) => {
-      this.items.push({ text: this.fitItem(text), resolve, errors });
+      this.items.push({ message: { ...item, text: this.fitItem(item.text) }, resolve, errors });
       void this.pump();
     });
   }
@@ -67,13 +72,21 @@ export class ChannelQueue {
     }
   }
 
-  private async sendBatch(batch: QueueItem[]) {
-    const text = (this.options.header ?? "") + batch.map((item) => item.text).join(ITEM_SEPARATOR);
+  private async sendBatch(batch: QueueItem<Rich>[]) {
+    const first = batch[0]!.message;
+    const message: QueueMessage<Rich> =
+      first.rich !== undefined
+        ? first
+        : {
+            text:
+              (this.options.header ?? "") +
+              batch.map((item) => item.message.text).join(ITEM_SEPARATOR),
+          };
 
     for (let attempt = 0; ; attempt += 1) {
       let result: ChannelSendResult;
       try {
-        result = await this.options.send(text);
+        result = await this.options.send(message);
       } catch (error) {
         result = {
           ok: false,
@@ -104,10 +117,10 @@ export class ChannelQueue {
         continue;
       }
 
-      const message = `${this.options.label} failed (${result.status || "network"}): ${result.detail}`;
-      console.error(message);
+      const failure = `${this.options.label} failed (${result.status || "network"}): ${result.detail}`;
+      console.error(failure);
       for (const item of batch) {
-        item.errors.push(message);
+        item.errors.push(failure);
         item.resolve(false);
       }
       return;
@@ -116,10 +129,13 @@ export class ChannelQueue {
 
   private takeBatch() {
     const budget = this.options.maxLength - (this.options.header?.length ?? 0);
-    const batch: QueueItem[] = [this.items.shift()!];
-    let length = batch[0]!.text.length;
+    const batch: QueueItem<Rich>[] = [this.items.shift()!];
+    if (batch[0]!.message.rich !== undefined) return batch;
+    let length = batch[0]!.message.text.length;
     while (this.items.length > 0) {
-      const nextLength = length + ITEM_SEPARATOR.length + this.items[0]!.text.length;
+      const next = this.items[0]!.message;
+      if (next.rich !== undefined) break;
+      const nextLength = length + ITEM_SEPARATOR.length + next.text.length;
       if (nextLength > budget) break;
       batch.push(this.items.shift()!);
       length = nextLength;

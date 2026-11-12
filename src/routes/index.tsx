@@ -95,6 +95,7 @@ function Dashboard() {
                 targets={dashboard.targets}
                 profiles={dashboard.profiles}
                 openFormSignal={targetFormSignal}
+                profileMinIntervalSeconds={dashboard.profileMinIntervalSeconds}
               />
             )}
             {tab === "profiles" && (
@@ -112,6 +113,7 @@ function Dashboard() {
                   targets={dashboard.targets}
                   profiles={dashboard.profiles}
                   openFormSignal={targetFormSignal}
+                  profileMinIntervalSeconds={dashboard.profileMinIntervalSeconds}
                 />
               </div>
               <div ref={sectionRefs.profiles}>
@@ -139,6 +141,7 @@ function Dashboard() {
         settings={dashboard.settings}
         targetFormSignal={targetFormSignal}
         targets={dashboard.targets}
+        profileMinIntervalSeconds={dashboard.profileMinIntervalSeconds}
       />
 
       <BottomNav active={tab} onSelect={selectTab} />

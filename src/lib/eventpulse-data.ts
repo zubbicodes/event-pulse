@@ -16,7 +16,8 @@ export const STATUS_META: Record<MonitorStatus, { label: string; className: stri
   available: { label: "Tickets Available", className: "bg-online/15 text-online ring-online/30" },
   monitoring: { label: "Monitoring", className: "bg-info/15 text-info ring-info/30" },
   captcha: { label: "Captcha Challenge", className: "bg-warn/15 text-warn ring-warn/30" },
-  limited: { label: "Rate Limited", className: "bg-alert/15 text-alert ring-alert/30" },
+  // Blocked (403/429) or a failed check; details are in the target's last check result.
+  limited: { label: "Check Failed", className: "bg-alert/15 text-alert ring-alert/30" },
   paused: { label: "Paused", className: "bg-muted text-muted-foreground ring-border" },
 };
 

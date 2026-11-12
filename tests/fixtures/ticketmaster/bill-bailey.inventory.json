@@ -1,0 +1,531 @@
+[
+ {
+  "schema": "urn:com.ticketmaster.services:schema:ismds:EventFacets:1.0",
+  "meta": {
+   "type": "urn:com.ticketmaster.services:type:ismds:EventFacets",
+   "modified": "2026-11-12T12:26:24.616725126Z",
+   "expires": "2026-11-12T12:27:24.616725126Z"
+  },
+  "eventId": "37006374A07F3DED",
+  "facets": [
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DG",
+    "inventoryTypes": [
+     "primary"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "GJ6DC7BRGM"
+    ],
+    "shapes": [
+     "s_31"
+    ],
+    "ticketTypes": [
+     "000000000001"
+    ],
+    "count": 3,
+    "places": [
+     "IJGCAMJWHJDUOORUGA[2[A,Q],3A]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DE",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GYY3MOZRXMM3WO4"
+    ],
+    "shapes": [
+     "s_34"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 1,
+    "places": [
+     "IJGCAMZ2JM5DMNQ"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DE",
+    "inventoryTypes": [
+     "primary"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "GJ6DC7BQ"
+    ],
+    "shapes": [
+     "s_34"
+    ],
+    "ticketTypes": [
+     "000000000001"
+    ],
+    "count": 3,
+    "places": [
+     "IJGCAMZ2JY5DOM[A,I,Q]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DG",
+    "inventoryTypes": [
+     "primary"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "GJ6DC7BRGM"
+    ],
+    "shapes": [
+     "s_26"
+    ],
+    "ticketTypes": [
+     "000000000001"
+    ],
+    "count": 9,
+    "places": [
+     "IJGCANR2JNFTU[MJ[QH[A,E],RGA,SG[E,I,M]],OJ[R,S,T]]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DE",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GYYTTMI4GYYRQHF4Q"
+    ],
+    "shapes": [
+     "s_36"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 1,
+    "places": [
+     "IJGCANZ2JM5DEMJZ"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DG",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GY6LLGN4GG6DX"
+    ],
+    "shapes": [
+     "s_27"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 2,
+    "places": [
+     "IJGCAOB2KJJDUMJYG[A,E]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GY5TRGRTTA6JZOA3Q"
+    ],
+    "shapes": [
+     "s_65"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 1,
+    "places": [
+     "IJGCAQR2I45DCOA"
+    ],
+    "placeGroups": [
+     "GF6DC"
+    ]
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GYOLLOQYTSOBQGE"
+    ],
+    "shapes": [
+     "s_59"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 1,
+    "places": [
+     "IJGCARB2I45DCNI"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GY43EOBRWM4DUO5SA"
+    ],
+    "shapes": [
+     "s_59"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 2,
+    "places": [
+     "IJGCARB2JQ5DCM[Q,Y]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "primary"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "GJ6DC7BQ"
+    ],
+    "shapes": [
+     "s_59"
+    ],
+    "ticketTypes": [
+     "000000000001"
+    ],
+    "count": 9,
+    "places": [
+     "IJGCARB2[JY5D[C,E,G],KM5D[G,I,K],LE5D[K,M,O]]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GY5TSGE3XMNDKGU2Q"
+    ],
+    "shapes": [
+     "s_61"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 2,
+    "places": [
+     "IJGCARJ2IM5DE[NY,OA]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GY4LHHBVDI2TTGU"
+    ],
+    "shapes": [
+     "s_61"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 6,
+    "places": [
+     "IJGCARJ2JU5D[C[N[Q,Y],O[A,I]],EM[A,I]]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "primary"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "GJ6DC7BQ"
+    ],
+    "shapes": [
+     "s_61"
+    ],
+    "ticketTypes": [
+     "000000000001"
+    ],
+    "count": 3,
+    "places": [
+     "IJGCARJ2LA5DE[N[Q,Y],OA]"
+    ],
+    "placeGroups": []
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "resale"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "HF6GYYRWNVYWMOJXHFYA"
+    ],
+    "shapes": [
+     "s_67"
+    ],
+    "ticketTypes": [
+     "SGBAUXDPKMA"
+    ],
+    "count": 1,
+    "places": [
+     "IJGCARR2IE5DIMY"
+    ],
+    "placeGroups": [
+     "GF6DC"
+    ]
+   },
+   {
+    "accessibility": [],
+    "attributes": [],
+    "available": true,
+    "description": "IE5DC",
+    "inventoryTypes": [
+     "primary"
+    ],
+    "offerTypes": [
+     "standard"
+    ],
+    "offers": [
+     "GJ6DC7BQ"
+    ],
+    "shapes": [
+     "s_67"
+    ],
+    "ticketTypes": [
+     "000000000001"
+    ],
+    "count": 4,
+    "places": [
+     "IJGCARR2[JU5DIMY,KY5DIM[I,Q,Y]]"
+    ],
+    "placeGroups": []
+   }
+  ],
+  "_links": {
+   "self": [
+    {
+     "href": "http://ismds-envoy.prd229.prod9.us-east-1.pub-tktm.io:443/host/37006374A07F3DED/facets/?by=shape+tickettypes+attributes+available+accessibility+offer+placeGroups+inventoryType+offerType+description&show=places&q=available&oq=&compress=places"
+    }
+   ],
+   "event": [
+    {
+     "href": "http://ismds-envoy.prd229.prod9.us-east-1.pub-tktm.io:443/event/37006374A07F3DED"
+    }
+   ],
+   "accessibility": [
+    {
+     "href": "http://ismds-envoy.prd229.prod9.us-east-1.pub-tktm.io:443/host/37006374A07F3DED/accessibilities/{adaTypeCode}",
+     "templated": true
+    }
+   ],
+   "tickettype": [
+    {
+     "href": "http://ismds-envoy.prd229.prod9.us-east-1.pub-tktm.io:443/host/37006374A07F3DED/tickettypes/{ticketTypeId}",
+     "templated": true
+    }
+   ],
+   "offer": [
+    {
+     "href": "http://ismds-envoy.prd229.prod9.us-east-1.pub-tktm.io:443/host/37006374A07F3DED/offers/{offerId}",
+     "templated": true
+    }
+   ],
+   "description": [
+    {
+     "href": "http://ismds-envoy.prd229.prod9.us-east-1.pub-tktm.io:443/host/37006374A07F3DED/descriptions/{descriptionId}",
+     "templated": true
+    }
+   ],
+   "place": [
+    {
+     "href": "http://ismds-envoy.prd229.prod9.us-east-1.pub-tktm.io:443/host/37006374A07F3DED/places/{placeId}",
+     "templated": true
+    }
+   ]
+  }
+ },
+ {
+  "quantity": 2,
+  "eventId": "37006374A07F3DED",
+  "total": 3,
+  "picks": [
+   {
+    "id": "lvr17v4j55",
+    "type": "seat",
+    "section": "BL E",
+    "row": "C",
+    "seatFrom": "27",
+    "seatTo": "28",
+    "originalPrice": 69.26,
+    "description": "Arena Floor",
+    "areaName": "ARENA",
+    "placeDescriptionId": "IE5DC",
+    "hasSpecialDescription": false,
+    "offerIds": [
+     "HF6GY5TSGE3XMNDKGU2Q"
+    ],
+    "snapshotImageUrl": "image?systemId=HOST_UK&sectionNames=BL+E&placeId=IJGCARJ2IM5DENY",
+    "quality": 0.891892,
+    "sellerBusinessType": "business",
+    "resaleListingId": "lvr17v4j55",
+    "sellerAffiliationType": "unaffiliated",
+    "sellerBusinessName": "Heyday",
+    "attributes": []
+   },
+   {
+    "id": "lsdpcfptwd",
+    "type": "seat",
+    "section": "BL D",
+    "row": "L",
+    "seatFrom": "12",
+    "seatTo": "13",
+    "originalPrice": 76.7,
+    "description": "Arena Floor",
+    "areaName": "ARENA",
+    "placeDescriptionId": "IE5DC",
+    "hasSpecialDescription": false,
+    "offerIds": [
+     "HF6GY43EOBRWM4DUO5SA"
+    ],
+    "snapshotImageUrl": "image?systemId=HOST_UK&sectionNames=BL+D&placeId=IJGCARB2JQ5DCMQ",
+    "quality": 0.87988,
+    "sellerBusinessType": "private",
+    "resaleListingId": "lsdpcfptwd",
+    "sellerAffiliationType": "unaffiliated",
+    "attributes": []
+   },
+   {
+    "id": "lqg8j4js5",
+    "type": "seat",
+    "section": "BL E",
+    "row": "M",
+    "seatFrom": "16",
+    "seatTo": "17",
+    "originalPrice": 92.58,
+    "description": "Arena Floor",
+    "areaName": "ARENA",
+    "placeDescriptionId": "IE5DC",
+    "hasSpecialDescription": false,
+    "offerIds": [
+     "HF6GY4LHHBVDI2TTGU"
+    ],
+    "snapshotImageUrl": "image?systemId=HOST_UK&sectionNames=BL+E&placeId=IJGCARJ2JU5DCNQ",
+    "quality": 0.855856,
+    "sellerBusinessType": "private",
+    "resaleListingId": "lqg8j4js5",
+    "sellerAffiliationType": "unaffiliated",
+    "attributes": []
+   }
+  ],
+  "descriptions": [
+   {
+    "id": "IE5DC",
+    "descriptions": [
+     "Arena Floor"
+    ]
+   }
+  ]
+ }
+]

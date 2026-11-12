@@ -28,6 +28,7 @@ export function getEmptyDashboardData(
       connectedProfiles: 0,
       avgResponseMs: 0,
     },
+    profileMinIntervalSeconds: 60,
     backendConnected: false,
     backendMessage: message,
   };

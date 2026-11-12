@@ -1,5 +1,7 @@
 import { lookup } from "node:dns/promises";
-import puppeteer, { type Page } from "puppeteer-core";
+import puppeteer from "puppeteer-core";
+import { captureTicketPage } from "./page-capture.server.ts";
+import { localBrowserEnabled, readWithLocalBrowser } from "./local-browser.server.ts";
 
 // The client's Multilogin profiles that monitor targets may be assigned to. A profile only checks
 // pages once a target is assigned to it.
@@ -12,8 +14,6 @@ const APPROVED_PROFILE_NAMES = new Set([
 const MULTILOGIN_API_URL = "https://api.multilogin.com";
 const PROXY_CACHE_MS = 10 * 60 * 1000;
 const MULTILOGIN_TIMEOUT_MS = 20_000;
-const TICKETMASTER_IDENTIFY_TIMEOUT_MS = 20_000;
-
 type RenderedPageInput = {
   endpoint: string;
   folderId: string;
@@ -112,6 +112,7 @@ export async function readRenderedTicketPage(input: RenderedPageInput) {
   if (!isApprovedMultiloginProfile(input.profileName)) {
     throw new Error(`Multilogin profile is not approved for monitoring: ${input.profileName}`);
   }
+  if (localBrowserEnabled()) return readWithLocalBrowser(input.url);
 
   const token = process.env["MULTILOGIN_API_TOKEN"];
   if (!token) throw new Error("MULTILOGIN_API_TOKEN is missing.");
@@ -144,29 +145,8 @@ async function readPageFromPort(port: number, url: string, credentials?: ProxyCr
   const page = await browser.newPage();
   try {
     if (credentials) await page.authenticate(credentials);
-    page.setDefaultNavigationTimeout(MULTILOGIN_TIMEOUT_MS);
-    let latestNavigationStatus: number | null = null;
-    page.on("response", (response) => {
-      if (response.request().isNavigationRequest() && response.frame() === page.mainFrame()) {
-        latestNavigationStatus = response.status();
-      }
-    });
-
-    const response = await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: MULTILOGIN_TIMEOUT_MS,
-    });
-    if (response?.status() === 401 && isTicketmasterUrl(url)) {
-      await waitForTicketmasterIdentification(page);
-    }
-    await page.waitForNetworkIdle({ idleTime: 1_000, timeout: 8_000 }).catch(() => undefined);
-
-    const statusCode = latestNavigationStatus ?? response?.status() ?? 200;
-    return {
-      html: await page.content(),
-      statusCode,
-      responseOk: statusCode >= 200 && statusCode < 400,
-    };
+    const { jsonResponseUrls: _diagnostics, ...captured } = await captureTicketPage(page, url);
+    return captured;
   } finally {
     await page.close({ runBeforeUnload: false }).catch(() => undefined);
     browser.disconnect();
@@ -342,26 +322,6 @@ async function loadWorkspaceProxyCredentials(token: string) {
   }
   workspaceProxyCache = { loadedAt: Date.now(), byProfile };
   return byProfile;
-}
-
-async function waitForTicketmasterIdentification(page: Page) {
-  await page
-    .waitForFunction(
-      () => {
-        const bodyText = document.body?.innerText.trim() ?? "";
-        return document.title.trim().length > 0 && bodyText !== '{"response":"identify"}';
-      },
-      { polling: 500, timeout: TICKETMASTER_IDENTIFY_TIMEOUT_MS },
-    )
-    .catch(() => undefined);
-}
-
-function isTicketmasterUrl(value: string) {
-  try {
-    return new URL(value).hostname.endsWith("ticketmaster.co.uk");
-  } catch {
-    return false;
-  }
 }
 
 async function ensureProfileRunning(input: RenderedPageInput, token: string) {
