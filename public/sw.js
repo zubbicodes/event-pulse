@@ -1,11 +1,18 @@
-const CACHE_NAME = "eventpulse-shell-v1";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/favicon.ico", "/icon.svg"];
+const CACHE_NAME = "hd1-drop-monitor-shell-v2";
+const APP_SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/favicon.ico",
+  "/icon.svg",
+  "/icon-192.png",
+  "/apple-touch-icon.png",
+];
 const ALERT_VIBRATION_PATTERN = [200, 80, 200, 80, 350];
 
 function buildAlertOptions({ body, tag, url }) {
   return {
     body,
-    icon: "/icon.svg",
+    icon: "/icon-192.png",
     badge: "/favicon.ico",
     tag,
     renotify: true,
@@ -13,7 +20,7 @@ function buildAlertOptions({ body, tag, url }) {
     silent: false,
     timestamp: Date.now(),
     vibrate: ALERT_VIBRATION_PATTERN,
-    actions: [{ action: "open", title: "Open HD-1" }],
+    actions: [{ action: "open", title: "Open HD-1 Drop Monitor" }],
     data: { url: url || "/" },
   };
 }
@@ -73,7 +80,7 @@ self.addEventListener("push", (event) => {
       payload.title,
       buildAlertOptions({
         body: payload.body,
-        tag: "eventpulse-alert",
+        tag: "hd1-drop-monitor-alert",
         url: payload.url,
       }),
     ),
@@ -88,7 +95,7 @@ self.addEventListener("message", (event) => {
       "HD-1 Drop Monitor test alert",
       buildAlertOptions({
         body: "Push notification path is ready for backend wiring.",
-        tag: `eventpulse-test-${Date.now()}`,
+        tag: `hd1-drop-monitor-test-${Date.now()}`,
         url: "/",
       }),
     ),

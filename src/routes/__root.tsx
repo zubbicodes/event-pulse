@@ -11,7 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { registerEventPulseServiceWorker } from "../lib/pwa";
+import { registerAppServiceWorker } from "../lib/pwa";
 import { PwaInstallPrompt } from "../components/eventpulse/PwaInstallPrompt";
 
 function NotFoundComponent() {
@@ -91,7 +91,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content: "Real-time multi-platform ticket monitoring and proxy profile management.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
+      { property: "og:site_name", content: "HD-1 Drop Monitor" },
+      { property: "og:image", content: "/icon-512.png" },
+      { name: "application-name", content: "HD-1 Drop Monitor" },
+      { name: "apple-mobile-web-app-title", content: "HD-1 Drop Monitor" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "HD-1 Drop Monitor | Multi-Site Ticket Monitor" },
     ],
     links: [
       {
@@ -105,7 +112,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.ico", sizes: "48x48" },
+      { rel: "icon", href: "/icon.svg", type: "image/svg+xml" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   shellComponent: RootShell,
@@ -132,7 +141,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   useEffect(() => {
-    registerEventPulseServiceWorker().catch((error: unknown) => {
+    registerAppServiceWorker().catch((error: unknown) => {
       console.error("HD-1 Drop Monitor service worker registration failed", error);
     });
   }, []);

@@ -67,6 +67,11 @@ export function hasConfiguredScraperProxyPool() {
   return parseScraperProxyPool(process.env["MULTILOGIN_SCRAPER_PROXIES"]).length > 0;
 }
 
+// True when checks run in throwaway quick profiles instead of the assigned client profiles.
+export function usesTemporaryProfiles() {
+  return approvedProfilesUnsupported || hasConfiguredScraperProxyPool();
+}
+
 export function getMultiloginTokenHealth(now = Date.now()): MultiloginTokenHealth {
   const token = process.env["MULTILOGIN_API_TOKEN"];
   if (!token) {
@@ -132,7 +137,7 @@ export async function readRenderedTicketPage(input: RenderedPageInput) {
     if (!isUnsupportedBrowserError(error)) throw error;
     approvedProfilesUnsupported = true;
     console.warn(
-      `HD-1: this Multilogin launcher cannot open approved profiles (${errorMessage(error)}). ` +
+      `HD-1 Drop Monitor: this Multilogin launcher cannot open approved profiles (${errorMessage(error)}). ` +
         `Checking pages through temporary ${quickProfileBrowser()} quick profiles instead.`,
     );
     return readWithQuickProfile(input, token, null);

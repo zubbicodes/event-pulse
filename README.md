@@ -130,6 +130,22 @@ Captcha challenge pages remain visible as a target status but do not create aler
 send push, Telegram, Discord, SMS, or WhatsApp messages. This prevents challenge pages from
 repeating a notification on every interval.
 
+## Monitor health
+
+`GET /api/eventpulse/health` always answers HTTP 200 with `ok: true` (it backs the Docker health
+check, and a blocked ticket site must not restart the container). Its `monitor` field reports
+whether ticket checks actually work:
+
+- `ok`: an active target had a clean check within `EVENTPULSE_HEALTH_STALE_MINUTES` (default 30).
+- `degraded`: active targets exist but none had a clean check in that window (blocked IP, launcher
+  or proxy problem). The scheduler logs one "no successful ticket checks" notice, a reminder every
+  6 hours, and one notice when checks recover.
+- `idle`: no target is active (all paused or outside their monitoring window).
+- `unknown`: Supabase did not answer.
+
+Set `EVENTPULSE_OPS_WEBHOOK_URLS` (comma-separated Discord-compatible webhooks) to receive every
+operational notice in an operator-only channel. Client ticket channels stay ticket-only.
+
 ## Linux launcher and Stealthfox quick profiles
 
 The production launcher container (`mlx-launcher`) only runs Stealthfox (Firefox). The approved

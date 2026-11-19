@@ -1,7 +1,8 @@
 {
+  "id": "/",
   "name": "HD-1 Drop Monitor",
-  "short_name": "HD-1 Monitor",
-  "description": "Multi-platform event ticketing analytics and proxy/profile monitoring.",
+  "short_name": "HD-1 Drop Monitor",
+  "description": "HD-1 Drop Monitor: multi-site ticket drop monitoring and private alerts.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -13,12 +14,25 @@
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/favicon.ico",
-      "sizes": "48x48",
-      "type": "image/x-icon"
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

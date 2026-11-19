@@ -4,7 +4,9 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { getMultiloginTokenHealth } from "./lib/eventpulse/multilogin-browser.server";
 import {
+  getMonitorFreshness,
   notifyMonitorFailure,
+  notifyMonitorFreshness,
   notifyMonitorRecovered,
   runMonitorPass,
 } from "./lib/eventpulse/supabase.server";
@@ -51,6 +53,9 @@ async function runScheduledMonitorPass() {
     await notifyMonitorRecovered().catch((notifyError: unknown) =>
       console.error("HD-1 monitor recovery alert failed", notifyError),
     );
+    await notifyMonitorFreshness().catch((notifyError: unknown) =>
+      console.error("HD-1 monitor freshness alert failed", notifyError),
+    );
   } catch (error) {
     console.error("HD-1 scheduled monitor pass failed", error);
     await notifyMonitorFailure(error).catch((notifyError: unknown) =>
@@ -94,7 +99,13 @@ export default {
     try {
       const url = new URL(request.url);
       if (url.pathname === "/api/eventpulse/health") {
-        return Response.json({ ok: true, multiloginToken: getMultiloginTokenHealth() });
+        // Always HTTP 200 / ok:true: this also backs the Docker health check, and a blocked ticket
+        // site must not make the platform restart the container. `monitor` tells the real story.
+        return Response.json({
+          ok: true,
+          multiloginToken: getMultiloginTokenHealth(),
+          monitor: await getMonitorFreshness(),
+        });
       }
       if (url.pathname === "/api/eventpulse/monitor-run") {
         return await handleMonitorRun(request);

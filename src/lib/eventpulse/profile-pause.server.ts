@@ -52,8 +52,8 @@ export function recordProfileBlock(profileName: string, statusCode: number, now 
     pausedUntil: now + pauseMs,
     reason:
       statusCode === 429
-        ? "Ticketmaster rate limited this profile (HTTP 429)."
-        : "Ticketmaster blocked this profile with an identity check (HTTP 403).",
+        ? "The ticket site rate limited this profile (HTTP 429)."
+        : "The ticket site blocked this profile (identity check or bot protection).",
     manual: false,
     blockLevel,
   };

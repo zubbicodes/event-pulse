@@ -157,7 +157,7 @@ test("alert matches the client's layout and stays within channel limits", () => 
       "↳ Sec BL E · Row C | £69.26 [2]",
       "",
       `Buy Tickets: ${urlFor(EVENTS.billBailey)}?qty=1`,
-      "HD-1 · 2026-11-12 13:42:14 UTC",
+      "HD-1 Drop Monitor · 2026-11-12 13:42:14 UTC",
     ].join("\n"),
   );
   assert.doesNotMatch(alert.telegramHtml, /<(?!\/?(b|i|a|code)\b)/);

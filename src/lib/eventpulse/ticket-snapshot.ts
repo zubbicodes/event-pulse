@@ -56,6 +56,20 @@ export function interpretTicketPage(
     };
   }
 
+  // Bot-protection walls often answer HTTP 200, so their page text must never be read as a
+  // ticket page. Treated like a 403: the profile pauses and retries later.
+  const wall = detectBotWall(page.html);
+  if (wall) {
+    return {
+      ...base,
+      kind: "blocked",
+      status: "limited",
+      availability: "",
+      error: `Bot protection page from the ticket site (${wall}).`,
+      report: null,
+    };
+  }
+
   if (page.statusCode === 404 || page.statusCode === 410) {
     return {
       ...base,
@@ -127,6 +141,26 @@ export function interpretTicketPage(
     error: null,
     report,
   };
+}
+
+// Interstitial pages served by bot-protection vendors instead of the real page. Patterns are the
+// vendors' own block/challenge markup, not their monitoring scripts, which also appear on normal
+// pages (e.g. Cloudflare's /cdn-cgi/challenge-platform loader, Google reCAPTCHA).
+const BOT_WALLS: Array<[vendor: string, pattern: RegExp]> = [
+  ["Imperva", /_Incapsula_Resource|Incapsula incident ID/i],
+  [
+    "Cloudflare",
+    /<title>\s*Just a moment\.\.\.\s*<\/title>|id="challenge-error-text"|cf-chl-widget/i,
+  ],
+  ["Akamai", /<title>\s*Access Denied\s*<\/title>[\s\S]*errors\.edgesuite\.net/i],
+  ["DataDome", /geo\.captcha-delivery\.com|ct\.captcha-delivery\.com/i],
+  ["PerimeterX", /id="px-captcha"|_pxCaptcha/i],
+];
+
+export function detectBotWall(html: string) {
+  // Walls are small pages; a full event page that merely mentions a vendor is not one.
+  if (html.length > 60_000) return null;
+  return BOT_WALLS.find(([, pattern]) => pattern.test(html))?.[0] ?? null;
 }
 
 function isTicketmasterHost(url: string) {

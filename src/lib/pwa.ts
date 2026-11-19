@@ -11,7 +11,7 @@ export function canUsePwaFeatures() {
   return typeof window !== "undefined" && "serviceWorker" in navigator && "Notification" in window;
 }
 
-export async function registerEventPulseServiceWorker() {
+export async function registerAppServiceWorker() {
   if (typeof window === "undefined" || !("serviceWorker" in navigator)) return undefined;
   const registration = await navigator.serviceWorker.register(SERVICE_WORKER_URL);
   await navigator.serviceWorker.ready;
@@ -38,7 +38,7 @@ export async function setupPushNotifications(): Promise<PushSetupResult> {
     };
   }
 
-  const registration = await registerEventPulseServiceWorker();
+  const registration = await registerAppServiceWorker();
   if (!registration) {
     return {
       status: "unsupported",

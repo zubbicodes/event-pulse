@@ -30,7 +30,7 @@ export const Route = createFileRoute("/")({
           "Monitor worldwide ticket drops, proxy profiles and fingerprint health from one dark-mode command center.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:card", content: "summary" },
     ],
   }),
   component: Dashboard,

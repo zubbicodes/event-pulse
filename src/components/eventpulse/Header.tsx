@@ -17,31 +17,41 @@ export function Header({
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/85 backdrop-blur">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 lg:flex lg:flex-wrap lg:justify-between lg:px-6">
-        <div className="min-w-0">
-          <h1 className="truncate font-display text-base font-bold tracking-tight sm:text-lg">
-            HD-1 Drop Monitor{" "}
-            <span className="text-muted-foreground">| Multi-Site Ticket Monitor</span>
-          </h1>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="relative flex h-2 w-2">
-                <span
-                  className={`absolute inline-flex h-full w-full animate-ping rounded-full ${
-                    backendConnected ? "bg-online" : "bg-warn"
-                  } opacity-75`}
-                />
-                <span
-                  className={`relative inline-flex h-2 w-2 rounded-full ${
-                    backendConnected ? "bg-online" : "bg-warn"
-                  }`}
-                />
+        <div className="flex min-w-0 items-center gap-3">
+          <img
+            src="/icon.svg"
+            alt=""
+            aria-hidden="true"
+            width={36}
+            height={36}
+            className="h-9 w-9 shrink-0 rounded-lg ring-1 ring-primary/30 lg:hidden"
+          />
+          <div className="min-w-0">
+            <h1 className="truncate font-display text-base font-bold tracking-tight sm:text-lg">
+              HD-1 Drop Monitor{" "}
+              <span className="text-muted-foreground">| Multi-Site Ticket Monitor</span>
+            </h1>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="relative flex h-2 w-2">
+                  <span
+                    className={`absolute inline-flex h-full w-full animate-ping rounded-full ${
+                      backendConnected ? "bg-online" : "bg-warn"
+                    } opacity-75`}
+                  />
+                  <span
+                    className={`relative inline-flex h-2 w-2 rounded-full ${
+                      backendConnected ? "bg-online" : "bg-warn"
+                    }`}
+                  />
+                </span>
+                {backendMessage} • {activeTargets} Targets Live
               </span>
-              {backendMessage} • {activeTargets} Targets Live
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-online/10 px-2 py-0.5 font-mono text-[11px] text-online ring-1 ring-online/25">
-              <ShieldCheck className="h-3 w-3" />
-              MultiLogin Sync: State Policy Ready ({activeProfiles} Profiles Active)
-            </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-online/10 px-2 py-0.5 font-mono text-[11px] text-online ring-1 ring-online/25">
+                <ShieldCheck className="h-3 w-3" />
+                MultiLogin Sync: State Policy Ready ({activeProfiles} Profiles Active)
+              </span>
+            </div>
           </div>
         </div>
         <Button size="sm" className="shrink-0 font-semibold" onClick={onAddTarget}>

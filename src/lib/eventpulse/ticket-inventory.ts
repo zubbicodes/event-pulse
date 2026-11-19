@@ -1,4 +1,4 @@
-// Structured ticket inventory for HD-1 alerts.
+// Structured ticket inventory for HD-1 Drop Monitor alerts.
 //
 // Ticket pages fetch their live inventory as JSON (Ticketmaster: the ISMDS "facets" and
 // "quickpicks" endpoints) and describe the event with schema.org JSON-LD. The monitoring browser
@@ -707,7 +707,7 @@ export function buildTicketAlert(input: {
   const allGroups = groupListings(report.matched);
   const groups = allGroups.slice(0, MAX_GROUPS);
   const hiddenGroups = allGroups.length - groups.length;
-  const footer = `HD-1 · ${formatTimestamp(input.checkedAt)} UTC`;
+  const footer = `HD-1 Drop Monitor · ${formatTimestamp(input.checkedAt)} UTC`;
   const filteredNote =
     report.filteredOutSections > 0
       ? `+${report.filteredOutSections} section${report.filteredOutSections === 1 ? "" : "s"} filtered by preferences`

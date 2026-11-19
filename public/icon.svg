@@ -1,9 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>HD-1 Drop Monitor</title>
   <rect width="512" height="512" rx="96" fill="#0F172A"/>
-  <path d="M116 306c54 0 54-100 108-100s54 100 108 100 54-100 108-100" fill="none" stroke="#06B6D4" stroke-width="34" stroke-linecap="round"/>
-  <circle cx="116" cy="306" r="28" fill="#10B981"/>
-  <circle cx="224" cy="206" r="28" fill="#F59E0B"/>
-  <circle cx="332" cy="306" r="28" fill="#10B981"/>
-  <circle cx="440" cy="206" r="28" fill="#F43F5E"/>
-  <path d="M128 382h256" stroke="#E2E8F0" stroke-width="28" stroke-linecap="round" opacity=".9"/>
+  <g transform="translate(66 164) scale(0.795)" fill="none" stroke-width="36" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 0V180M86 0V180M18 90H86" stroke="#06B6D4"/>
+    <path d="M152 0H182A90 90 0 0 1 182 180H152Z" stroke="#06B6D4"/>
+    <path d="M334 96H366" stroke="#E2E8F0"/>
+    <path d="M424 34L460 0V180" stroke="#10B981"/>
+  </g>
+  <path d="M156 382H356" stroke="#F59E0B" stroke-width="24" stroke-linecap="round"/>
 </svg>

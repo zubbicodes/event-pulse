@@ -28,7 +28,14 @@ import {
   hasConfiguredScraperProxyPool,
   isApprovedMultiloginProfile,
   readRenderedTicketPage,
+  usesTemporaryProfiles,
 } from "./multilogin-browser.server";
+import {
+  computeMonitorFreshness,
+  staleAfterMinutes,
+  type FreshnessRow,
+  type MonitorFreshness,
+} from "./monitor-freshness";
 import { ChannelQueue, parseRetryAfterMs, type ChannelSendResult } from "./channel-queue.server";
 import {
   getProfilePause,
@@ -798,7 +805,7 @@ async function handleCheckResult(
         tone: "warn",
         operational: true,
         content: dashboardAlert(
-          "⏹ HD-1: event page removed",
+          "⏹ HD-1 Drop Monitor: event page removed",
           `${target.event}: the ticket site no longer has this event page (HTTP ${check.statusCode}), usually because the event is over. Monitoring for it has stopped.\n${target.url}`,
         ),
       },
@@ -816,7 +823,7 @@ async function handleCheckResult(
   if (!check.usesRotatingProxy && recordProfileSuccess(target.profile)) {
     await resolveOpsNotice(
       `blocked:${target.profile}`,
-      "✅ HD-1: profile checks resumed",
+      "✅ HD-1 Drop Monitor: profile checks resumed",
       `Ticketmaster is answering profile "${target.profile}" again; ticket checks resumed.`,
       context,
     );
@@ -871,11 +878,19 @@ async function handleBlockedCheck(
   );
   // One notice per block episode; the escalating pauses after it stay on the dashboard only.
   if (pause.blockLevel !== 1) return;
+  const reason =
+    check.statusCode === 429
+      ? "a slower request rate (HTTP 429)"
+      : "identity verification (HTTP 403)";
   await sendOpsNotice(
     `blocked:${target.profile}`,
-    "⏸ HD-1: profile paused",
+    "⏸ HD-1 Drop Monitor: profile paused",
     [
-      `Ticketmaster asked profile "${target.profile}" for ${check.statusCode === 429 ? "a slower request rate (HTTP 429)" : "identity verification (HTTP 403)"}.`,
+      usesTemporaryProfiles()
+        ? `Ticketmaster asked for ${reason} on checks for targets assigned to "${target.profile}". ` +
+          "These checks run in temporary browsers on the server's own connection, not in the client " +
+          "profile; add scraper proxies (MULTILOGIN_SCRAPER_PROXIES) to avoid server-IP blocks."
+        : `Ticketmaster asked profile "${target.profile}" for ${reason}.`,
       "Its checks are paused and retried automatically. You will get one message when checks resume.",
     ].join("\n"),
     context,
@@ -900,7 +915,7 @@ async function handleFailedCheck(
   ).length;
   await sendOpsNotice(
     key,
-    "⚠️ HD-1: ticket checks failing",
+    "⚠️ HD-1 Drop Monitor: ticket checks failing",
     [
       `${target.event} could not be checked ${FAILURE_NOTIFY_AFTER} times in a row${affected > 1 ? ` (${affected} targets affected)` : ""}.`,
       `Reason: ${message}`,
@@ -917,7 +932,7 @@ async function clearFailure(target: BackendMonitorTarget, context: AlertContext)
   if ([...failureStreaks.values()].some((item) => item.key === streak.key)) return;
   await resolveOpsNotice(
     streak.key,
-    "✅ HD-1: ticket checks recovered",
+    "✅ HD-1 Drop Monitor: ticket checks recovered",
     "Targets are being checked normally again.",
     context,
   );
@@ -979,6 +994,7 @@ async function createAndDeliverAlert(
     (!input.operational || systemNoticesToChannels());
   // Ticket alerts are only recorded when they are delivered; system notices are always logged.
   if (!deliver && !input.operational) return;
+  if (input.operational) await postOpsWebhooks(input.content.title, input.content.text);
   const [alert] = await rest<AlertRow[]>("eventpulse_alerts", {
     method: "POST",
     prefer: "return=representation",
@@ -1017,7 +1033,7 @@ export async function notifyMonitorFailure(error: unknown) {
 
   const message = formatUnknownError(error).replace(/\s+/g, " ").slice(0, 500);
   await deliverOperationalAlert(
-    "🔴 HD-1: monitor pass failed",
+    "🔴 HD-1 Drop Monitor: monitor pass failed",
     [
       "Ticket checks are failing; no ticket alerts are being produced until this clears.",
       `Error: ${message}`,
@@ -1032,14 +1048,110 @@ export async function notifyMonitorRecovered() {
   const { since } = monitorOutage;
   monitorOutage = null;
   await deliverOperationalAlert(
-    "✅ HD-1: monitor recovered",
+    "✅ HD-1 Drop Monitor: monitor recovered",
     `Ticket checks are running again.\nFailing since: ${since}\nRecovered: ${new Date().toISOString()}`,
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Monitor freshness: the scheduler can run "successfully" while every check fails (blocked IP,
+// launcher error), which once left monitoring silently down for days. Freshness looks at the
+// target rows themselves: when did any active target last get a clean check?
+
+const FRESHNESS_CACHE_MS = 60_000;
+let freshnessCache: { at: number; value: MonitorFreshness } | null = null;
+
+export async function getMonitorFreshness(): Promise<MonitorFreshness> {
+  if (freshnessCache && Date.now() - freshnessCache.at < FRESHNESS_CACHE_MS) {
+    return freshnessCache.value;
+  }
+  let value: MonitorFreshness;
+  try {
+    // Capped well below the Docker health-check timeout so a slow Supabase never fails it.
+    const rows = await Promise.race([
+      rest<FreshnessRow[]>("eventpulse_targets", {
+        query: {
+          select: "last_checked_at,last_error,monitor_starts_at,monitor_ends_at",
+          status: "neq.paused",
+        },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Supabase did not answer within 3s.")), 3_000).unref?.(),
+      ),
+    ]);
+    value = computeMonitorFreshness(rows);
+  } catch (error) {
+    value = {
+      status: "unknown",
+      activeTargets: 0,
+      lastSuccessfulCheckAt: null,
+      staleAfterMinutes: staleAfterMinutes(),
+      error: formatUnknownError(error).slice(0, 200),
+    };
+  }
+  freshnessCache = { at: Date.now(), value };
+  return value;
+}
+
+const STALE_NOTICE_REPEAT_MS = 6 * 60 * 60 * 1000;
+let staleMonitor: { since: string; alertedAt: number } | null = null;
+
+// Called by the scheduler after each pass (freshness itself is cached for a minute). One notice when
+// checks go stale, a reminder every 6 hours while they stay stale, one notice when they recover.
+export async function notifyMonitorFreshness() {
+  const freshness = await getMonitorFreshness();
+  if (freshness.status === "degraded") {
+    const now = Date.now();
+    if (staleMonitor && now - staleMonitor.alertedAt < STALE_NOTICE_REPEAT_MS) return;
+    staleMonitor = { since: staleMonitor?.since ?? new Date(now).toISOString(), alertedAt: now };
+    await deliverOperationalAlert(
+      "🟠 HD-1 Drop Monitor: no successful ticket checks",
+      [
+        `None of the ${freshness.activeTargets} active targets has had a clean check for over ${freshness.staleAfterMinutes} minutes, so no ticket alerts can be produced.`,
+        `Last clean check: ${freshness.lastSuccessfulCheckAt ?? "never"}`,
+        "See each target's last error on the dashboard (for example blocked IP, launcher or proxy problems).",
+      ].join("\n"),
+    );
+    return;
+  }
+  if (freshness.status === "ok" && staleMonitor) {
+    const { since } = staleMonitor;
+    staleMonitor = null;
+    await deliverOperationalAlert(
+      "✅ HD-1 Drop Monitor: ticket checks healthy again",
+      `Clean ticket checks resumed.\nStale since: ${since}\nRecovered: ${new Date().toISOString()}`,
+    );
+  }
+}
+
+// Operator-only channel (EVENTPULSE_OPS_WEBHOOK_URLS, Discord-compatible webhooks, comma-separated).
+// Every operational notice goes here; the client's ticket channels stay ticket-only.
+async function postOpsWebhooks(title: string, body: string) {
+  const urls = (process.env["EVENTPULSE_OPS_WEBHOOK_URLS"] ?? "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean);
+  await Promise.all(
+    urls.map((url, index) =>
+      fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: `**${title}**\n${body}`.slice(0, 1900) }),
+        signal: AbortSignal.timeout(10_000),
+      })
+        .then((response) => {
+          if (!response.ok)
+            console.error(`HD-1 ops webhook #${index + 1} failed (${response.status}).`);
+        })
+        .catch(() => console.error(`HD-1 ops webhook #${index + 1} could not be reached.`)),
+    ),
   );
 }
 
 // Settings come from Supabase when it answers; if Supabase itself is the failure, fall back to the
 // chat channels configured in the environment.
 async function deliverOperationalAlert(title: string, body: string) {
+  await postOpsWebhooks(title, body);
   if (!systemNoticesToChannels()) {
     // Dashboard only; if Supabase itself is down this lands in the server log instead.
     await rest("eventpulse_alerts", {
@@ -1334,7 +1446,7 @@ async function notifyMultiloginTokenExpiry(
 
   const delivery = await deliverAlert({
     ...(alert?.id ? { alertId: alert.id } : {}),
-    content: dashboardAlert("⚠️ HD-1: MultiLogin token", alertMessage),
+    content: dashboardAlert("⚠️ HD-1 Drop Monitor: MultiLogin token", alertMessage),
     settings,
     subscriptions,
   });
